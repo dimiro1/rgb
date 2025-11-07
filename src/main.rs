@@ -10,6 +10,6 @@ fn main() {
     println!("BC: 0x{:04X}", ctx.bc());
     println!("DE: 0x{:04X}", ctx.de());
     println!("HL: 0x{:04X}", ctx.hl());
-    println!("SP: 0x{:04X}", ctx.sp);
-    println!("PC: 0x{:04X}", ctx.pc);
+    println!("SP: 0x{:04X}", ctx.sp());
+    println!("PC: 0x{:04X}", ctx.pc());
 }
