@@ -1,15 +1,20 @@
-mod context;
+mod instructions;
+mod io;
+mod system;
 
-use context::SystemState;
+use system::State;
 
 fn main() {
-    let ctx = SystemState::new();
+    let state = State::new();
 
     // Print all initial register values
-    println!("AF: 0x{:04X}", ctx.af());
-    println!("BC: 0x{:04X}", ctx.bc());
-    println!("DE: 0x{:04X}", ctx.de());
-    println!("HL: 0x{:04X}", ctx.hl());
-    println!("SP: 0x{:04X}", ctx.sp());
-    println!("PC: 0x{:04X}", ctx.pc());
+    println!("AF: 0x{:04X}", state.af());
+    println!("BC: 0x{:04X}", state.bc());
+    println!("DE: 0x{:04X}", state.de());
+    println!("HL: 0x{:04X}", state.hl());
+    println!("SP: 0x{:04X}", state.sp());
+    println!("PC: 0x{:04X}", state.pc());
+
+    // print the P1 memory address
+    println!("P1: 0x{:04X}", state.read(io::P1))
 }
