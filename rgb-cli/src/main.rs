@@ -1,8 +1,4 @@
-mod instructions;
-mod io;
-mod system;
-
-use system::State;
+use rgb_core::{io, system::State};
 
 fn main() {
     let state = State::new();

@@ -1,0 +1,2 @@
+[alias]
+wasm = "build -p rgb-wasm --target wasm32-unknown-unknown --release"

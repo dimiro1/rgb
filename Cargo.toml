@@ -1,6 +1,11 @@
-[package]
-name = "rgb"
+[workspace]
+resolver = "2"
+members = [
+    "rgb-core",
+    "rgb-cli",
+    "rgb-wasm",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
-
-[dependencies]

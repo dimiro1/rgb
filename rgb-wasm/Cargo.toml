@@ -1,0 +1,12 @@
+[package]
+name = "rgb-wasm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rgb-core = { path = "../rgb-core" }
+wasm-bindgen = "0.2.95"
+web-sys = { version = "0.3.72", features = ["Document", "Element", "HtmlElement", "Node", "Window"] }
+
+[lib]
+crate-type = ["cdylib"]
