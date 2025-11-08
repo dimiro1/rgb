@@ -219,6 +219,17 @@ pub fn ret_nz(state: &mut State) {
     }
 }
 
+/// Pop 16-bit value from stack into BC register pair
+pub fn pop_bc(state: &mut State) {
+    // Pop low byte (C)
+    state.c = state.read(state.sp);
+    state.sp = state.sp.wrapping_add(1);
+
+    // Pop high byte (B)
+    state.b = state.read(state.sp);
+    state.sp = state.sp.wrapping_add(1);
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1762,6 +1773,11 @@ pub fn execute(state: &mut State) {
             // Conditional return: 8 cycles if not taken, 20 cycles if taken
             state.cycles += if !state.flag_z() { 20 } else { 8 };
         }
+        0xC1 => {
+            /* POP BC */
+            pop_bc(state);
+            state.cycles += 12;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -2478,6 +2494,57 @@ mod tests {
 
         assert_eq!(state.pc, 0x1234);
         assert_eq!(state.sp, 0x1002);
+    }
+
+    // Tests for POP BC
+    #[test]
+    fn test_pop_bc_basic() {
+        let mut state = State::new();
+        state.sp = 0xFFF0;
+        state.b = 0x00;
+        state.c = 0x00;
+
+        // Setup stack with value 0x1234
+        state.write(0xFFF0, 0x34); // Low byte (C)
+        state.write(0xFFF1, 0x12); // High byte (B)
+
+        pop_bc(&mut state);
+
+        assert_eq!(state.c, 0x34);
+        assert_eq!(state.b, 0x12);
+        assert_eq!(state.sp, 0xFFF2); // SP incremented by 2
+    }
+
+    #[test]
+    fn test_pop_bc_little_endian() {
+        let mut state = State::new();
+        state.sp = 0x2000;
+
+        // Test that bytes are popped in correct order (little-endian)
+        state.write(0x2000, 0xCD); // Low byte goes to C
+        state.write(0x2001, 0xAB); // High byte goes to B
+
+        pop_bc(&mut state);
+
+        assert_eq!(state.c, 0xCD);
+        assert_eq!(state.b, 0xAB);
+        assert_eq!(state.sp, 0x2002);
+    }
+
+    #[test]
+    fn test_pop_bc_overwrites_previous_values() {
+        let mut state = State::new();
+        state.sp = 0x3000;
+        state.b = 0xFF;
+        state.c = 0xFF;
+
+        state.write(0x3000, 0x11);
+        state.write(0x3001, 0x22);
+
+        pop_bc(&mut state);
+
+        assert_eq!(state.c, 0x11);
+        assert_eq!(state.b, 0x22);
     }
 
     #[test]
