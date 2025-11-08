@@ -142,6 +142,60 @@ pub fn rlca(state: &mut State) {
     state.set_flag_z(false); // RLCA always resets Z flag
 }
 
+/// Rotate right circular (RRC) - rotates value right, bit 0 goes to carry and bit 7
+fn rrc_8bit(value: u8, state: &mut State) -> u8 {
+    let bit0 = (value & 0x01) != 0;
+    let result = (value >> 1) | (if bit0 { 0x80 } else { 0 });
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(false);
+    state.set_flag_h(false);
+    state.set_flag_c(bit0);
+
+    result
+}
+
+/// Rotate register A right circular
+pub fn rrc_a(state: &mut State) {
+    state.a = rrc_8bit(state.a, state);
+}
+
+/// Rotate register B right circular
+pub fn rrc_b(state: &mut State) {
+    state.b = rrc_8bit(state.b, state);
+}
+
+/// Rotate register C right circular
+pub fn rrc_c(state: &mut State) {
+    state.c = rrc_8bit(state.c, state);
+}
+
+/// Rotate register D right circular
+pub fn rrc_d(state: &mut State) {
+    state.d = rrc_8bit(state.d, state);
+}
+
+/// Rotate register E right circular
+pub fn rrc_e(state: &mut State) {
+    state.e = rrc_8bit(state.e, state);
+}
+
+/// Rotate register H right circular
+pub fn rrc_h(state: &mut State) {
+    state.h = rrc_8bit(state.h, state);
+}
+
+/// Rotate register L right circular
+pub fn rrc_l(state: &mut State) {
+    state.l = rrc_8bit(state.l, state);
+}
+
+/// RRCA - Rotate A right circular (always resets Z flag)
+pub fn rrca(state: &mut State) {
+    state.a = rrc_8bit(state.a, state);
+    state.set_flag_z(false); // RRCA always resets Z flag
+}
+
 /// Increment the BC register pair by 1
 pub fn inc_bc(state: &mut State) {
     let value = state.bc().wrapping_add(1);
@@ -264,8 +318,7 @@ pub fn execute(state: &mut State) {
         }
         0x0F => {
             /* RRCA */
-            // TODO: Implement RRC (Rotate Right Circular) function
-            unimplemented!("RRCA - needs RRC function");
+            rrca(state);
         }
         0x10 => {
             /* STOP */
@@ -657,5 +710,136 @@ mod tests {
         assert!(!state.flag_n());
         assert!(!state.flag_h());
         assert!(state.flag_c()); // Bit 7 was 1
+    }
+
+    #[test]
+    fn test_rrc_normal() {
+        let mut state = State::new();
+        state.a = 0b0100_1010; // 0x4A
+
+        rrc_a(&mut state);
+
+        assert_eq!(state.a, 0b0010_0101); // 0x25
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 0 was 0
+    }
+
+    #[test]
+    fn test_rrc_with_carry() {
+        let mut state = State::new();
+        state.b = 0b1100_1011; // 0xCB
+
+        rrc_b(&mut state);
+
+        assert_eq!(state.b, 0b1110_0101); // 0xE5
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_rrc_zero_result() {
+        let mut state = State::new();
+        state.c = 0x00;
+
+        rrc_c(&mut state);
+
+        assert_eq!(state.c, 0x00);
+        assert!(state.flag_z()); // Result is zero
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_rrc_bit0_wraps() {
+        let mut state = State::new();
+        state.d = 0x01; // 0b0000_0001
+
+        rrc_d(&mut state);
+
+        assert_eq!(state.d, 0x80); // 0b1000_0000 - bit 0 wraps to bit 7
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_rrc_all_registers() {
+        let mut state = State::new();
+
+        state.a = 0x80;
+        rrc_a(&mut state);
+        assert_eq!(state.a, 0x40);
+
+        state.b = 0x80;
+        rrc_b(&mut state);
+        assert_eq!(state.b, 0x40);
+
+        state.c = 0x80;
+        rrc_c(&mut state);
+        assert_eq!(state.c, 0x40);
+
+        state.d = 0x80;
+        rrc_d(&mut state);
+        assert_eq!(state.d, 0x40);
+
+        state.e = 0x80;
+        rrc_e(&mut state);
+        assert_eq!(state.e, 0x40);
+
+        state.h = 0x80;
+        rrc_h(&mut state);
+        assert_eq!(state.h, 0x40);
+
+        state.l = 0x80;
+        rrc_l(&mut state);
+        assert_eq!(state.l, 0x40);
+    }
+
+    #[test]
+    fn test_rrc_all_bits() {
+        let mut state = State::new();
+        state.a = 0xFF;
+
+        rrc_a(&mut state);
+
+        assert_eq!(state.a, 0xFF); // All bits rotate, stays same
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_rrca_always_resets_z() {
+        let mut state = State::new();
+        state.a = 0x00;
+
+        rrca(&mut state);
+
+        assert_eq!(state.a, 0x00);
+        assert!(!state.flag_z()); // RRCA always resets Z, even when result is 0
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_rrca_normal() {
+        let mut state = State::new();
+        state.a = 0b1100_1011; // 0xCB
+
+        rrca(&mut state);
+
+        assert_eq!(state.a, 0b1110_0101); // 0xE5
+        assert!(!state.flag_z()); // RRCA always resets Z
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
     }
 }
