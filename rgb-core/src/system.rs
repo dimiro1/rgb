@@ -1,6 +1,16 @@
-/// Represents the GameBoy system state.
-/// It holds the state of the whole system, including the CPU, memory and PPU state.
-pub struct State {
+use crate::cartridge::Cartridge;
+use crate::memory::{FlatMemory, Memory};
+use crate::mmu::Mmu;
+
+/// Game Boy emulator
+///
+/// This is the new main structure that owns everything:
+/// - CPU registers and state
+/// - Memory (MMU for production, FlatMemory for tests)
+///
+/// This replaces the old `State` struct for new code.
+pub struct GameBoy<M: Memory = Mmu> {
+    // CPU Registers
     pub a: u8,
     pub f: u8,
     pub h: u8,
@@ -11,77 +21,37 @@ pub struct State {
     pub e: u8,
     pub pc: u16,
     pub sp: u16,
-    pub mem: [u8; 0x10000], // 64KB addressable memory
-    pub ime: bool,          // Interrupt Master Enable flag
-    pub halt: bool,         // CPU is halted
-    pub halt_bug: bool,     // HALT bug triggered (PC not incremented after HALT)
-    pub ei_delay: bool,     // EI takes effect after next instruction
-    pub di_delay: bool,     // DI takes effect after next instruction
-    pub cycles: u32,        // Total CPU cycles executed
-    pub last_opcode: u8,    // Last executed opcode (for delayed interrupt handling)
+
+    // CPU State
+    pub ime: bool,       // Interrupt Master Enable flag
+    pub halt: bool,      // CPU is halted
+    pub halt_bug: bool,  // HALT bug triggered (PC not incremented after HALT)
+    pub ei_delay: bool,  // EI takes effect after next instruction
+    pub di_delay: bool,  // DI takes effect after next instruction
+    pub cycles: u32,     // Total CPU cycles executed
+    pub last_opcode: u8, // Last executed opcode (for delayed interrupt handling)
+
+    // Memory (generic over Memory trait)
+    pub mmu: M,
 }
 
-fn reset_cpu(state: &mut State) {
-    state.set_af(0x01B0);
-    state.set_bc(0x0013);
-    state.set_de(0x00D8);
-    state.set_hl(0x014D);
-    state.set_sp(0xFFFE);
-    state.set_pc(0x0100);
-}
+impl GameBoy<Mmu> {
+    /// Create a new Game Boy with the given cartridge
+    pub fn with_cartridge(cartridge: Cartridge) -> Self {
+        let mut gb = GameBoy {
+            // Initialize CPU registers to post-boot values
+            a: 0x01,
+            f: 0xB0,
+            b: 0x00,
+            c: 0x13,
+            d: 0x00,
+            e: 0xD8,
+            h: 0x01,
+            l: 0x4D,
+            sp: 0xFFFE,
+            pc: 0x0100,
 
-fn reset_memory(state: &mut State) {
-    use crate::io::*;
-
-    state.write(P1, 0xFF);
-    state.write(DIV, 0xAF);
-    state.write(TIMA, 0x00);
-    state.write(TMA, 0x00);
-    state.write(TAC, 0x00);
-    state.write(NR_10, 0x80);
-    state.write(NR_11, 0xBF);
-    state.write(NR_12, 0xF3);
-    state.write(NR_14, 0xBF);
-    state.write(NR_21, 0x3F);
-    state.write(NR_22, 0x00);
-    state.write(NR_24, 0xBF);
-    state.write(NR_30, 0x7F);
-    state.write(NR_31, 0xFF);
-    state.write(NR_32, 0x9F);
-    state.write(NR_34, 0xBF);
-    state.write(NR_41, 0xFF);
-    state.write(NR_42, 0x00);
-    state.write(NR_43, 0x00);
-    state.write(NR_44, 0xBF);
-    state.write(NR_50, 0x77);
-    state.write(NR_51, 0xF3);
-    state.write(NR_52, 0xF1);
-    state.write(LCDC, 0x91);
-    state.write(SCY, 0x00);
-    state.write(SCX, 0x00);
-    state.write(LYC, 0x00);
-    state.write(BGP, 0xFC);
-    state.write(OBP0, 0xFF);
-    state.write(OBP1, 0xFF);
-    state.write(WY, 0x00);
-    state.write(WX, 0x00);
-    state.write(IE, 0x00);
-}
-
-impl Default for State {
-    fn default() -> Self {
-        let mut state = State {
-            a: 0,
-            f: 0,
-            h: 0,
-            l: 0,
-            b: 0,
-            c: 0,
-            d: 0,
-            e: 0,
-            pc: 0,
-            sp: 0,
-            mem: [0; 0x10000],
+            // CPU state
             ime: false,
             halt: false,
             halt_bug: false,
@@ -89,114 +59,108 @@ impl Default for State {
             di_delay: false,
             cycles: 0,
             last_opcode: 0,
+
+            // MMU with cartridge
+            mmu: Mmu::new(cartridge),
         };
-        reset_cpu(&mut state);
-        reset_memory(&mut state);
-        state
+
+        // Initialize I/O registers to post-boot values
+        gb.init_io_registers();
+
+        gb
+    }
+
+    /// Initialize I/O registers to their post-boot values
+    fn init_io_registers(&mut self) {
+        use crate::io::*;
+
+        self.write(P1, 0xFF);
+        self.write(DIV, 0xAF);
+        self.write(TIMA, 0x00);
+        self.write(TMA, 0x00);
+        self.write(TAC, 0x00);
+        self.write(NR_10, 0x80);
+        self.write(NR_11, 0xBF);
+        self.write(NR_12, 0xF3);
+        self.write(NR_14, 0xBF);
+        self.write(NR_21, 0x3F);
+        self.write(NR_22, 0x00);
+        self.write(NR_24, 0xBF);
+        self.write(NR_30, 0x7F);
+        self.write(NR_31, 0xFF);
+        self.write(NR_32, 0x9F);
+        self.write(NR_34, 0xBF);
+        self.write(NR_41, 0xFF);
+        self.write(NR_42, 0x00);
+        self.write(NR_43, 0x00);
+        self.write(NR_44, 0xBF);
+        self.write(NR_50, 0x77);
+        self.write(NR_51, 0xF3);
+        self.write(NR_52, 0xF1);
+        self.write(LCDC, 0x91);
+        self.write(SCY, 0x00);
+        self.write(SCX, 0x00);
+        self.write(LYC, 0x00);
+        self.write(BGP, 0xFC);
+        self.write(OBP0, 0xFF);
+        self.write(OBP1, 0xFF);
+        self.write(WY, 0x00);
+        self.write(WX, 0x00);
+        self.write(IE, 0x00);
     }
 }
 
-impl State {
-    /// Initializes the CPU registers to their default power-on values.
-    pub fn new() -> Self {
-        Self::default()
+// Generic implementation for all Memory types
+impl<M: Memory> GameBoy<M> {
+    /// Create a GameBoy with custom memory (for testing)
+    pub fn with_memory(memory: M) -> Self {
+        GameBoy {
+            // Initialize CPU registers to post-boot values
+            a: 0x01,
+            f: 0xB0,
+            b: 0x00,
+            c: 0x13,
+            d: 0x00,
+            e: 0xD8,
+            h: 0x01,
+            l: 0x4D,
+            sp: 0xFFFE,
+            pc: 0x0100,
+
+            // CPU state
+            ime: false,
+            halt: false,
+            halt_bug: false,
+            ei_delay: false,
+            di_delay: false,
+            cycles: 0,
+            last_opcode: 0,
+
+            mmu: memory,
+        }
     }
 
-    /// Getter and setter for the AF register pair.
-    #[inline]
-    pub fn af(&self) -> u16 {
-        ((self.a as u16) << 8) | (self.f as u16)
-    }
-
-    /// Sets the AF register pair.
-    #[inline]
-    pub fn set_af(&mut self, value: u16) {
-        self.a = (value >> 8) as u8;
-        self.f = value as u8;
-    }
-
-    /// Getter and setter for the BC register pair.
-    #[inline]
-    pub fn bc(&self) -> u16 {
-        ((self.b as u16) << 8) | (self.c as u16)
-    }
-
-    /// Sets the BC register pair.
-    #[inline]
-    pub fn set_bc(&mut self, value: u16) {
-        self.b = (value >> 8) as u8;
-        self.c = value as u8;
-    }
-
-    /// Getter and setter for the DE register pair.
-    #[inline]
-    pub fn de(&self) -> u16 {
-        ((self.d as u16) << 8) | (self.e as u16)
-    }
-
-    /// Sets the DE register pair.
-    #[inline]
-    pub fn set_de(&mut self, value: u16) {
-        self.d = (value >> 8) as u8;
-        self.e = value as u8;
-    }
-
-    /// Getter and setter for the HL register pair.
-    #[inline]
-    pub fn hl(&self) -> u16 {
-        ((self.h as u16) << 8) | (self.l as u16)
-    }
-
-    /// Sets the HL register pair.
-    #[inline]
-    pub fn set_hl(&mut self, value: u16) {
-        self.h = (value >> 8) as u8;
-        self.l = value as u8;
-    }
-
-    /// Gets the stack pointer.
-    #[inline]
-    pub fn sp(&self) -> u16 {
-        self.sp
-    }
-
-    /// Sets the stack pointer.
-    #[inline]
-    pub fn set_sp(&mut self, value: u16) {
-        self.sp = value;
-    }
-
-    /// Gets the program counter.
-    #[inline]
-    pub fn pc(&self) -> u16 {
-        self.pc
-    }
-
-    /// Sets the program counter.
-    #[inline]
-    pub fn set_pc(&mut self, value: u16) {
-        self.pc = value;
-    }
-
-    /// Reads a byte from memory at the specified address.
+    /// Read a byte from memory
     #[inline]
     pub fn read(&self, addr: u16) -> u8 {
-        self.mem[addr as usize]
+        self.mmu.read(addr)
     }
 
+    /// Write a byte to memory
+    #[inline]
+    pub fn write(&mut self, addr: u16, value: u8) {
+        self.mmu.write(addr, value)
+    }
+
+    /// Read a 16-bit word from memory (little-endian)
     #[inline]
     pub fn read_word(&self, addr: u16) -> u16 {
-        let high = self.read(addr + 1) as u16;
         let low = self.read(addr) as u16;
+        let high = self.read(addr + 1) as u16;
         (high << 8) | low
     }
 
-    /// Writes a byte to memory at the specified address.
-    #[inline]
-    pub fn write(&mut self, addr: u16, value: u8) {
-        self.mem[addr as usize] = value;
-    }
-
+    /// Write a 16-bit word to memory (little-endian)
     #[inline]
     pub fn write_word(&mut self, addr: u16, data: u16) {
         let high = (data >> 8) as u8;
@@ -205,20 +169,77 @@ impl State {
         self.write(addr + 1, high);
     }
 
-    // Flag register helpers (F register: Z N H C - - - -)
-    const FLAG_Z: u8 = 0b1000_0000; // Zero flag
-    const FLAG_N: u8 = 0b0100_0000; // Subtract flag
-    const FLAG_H: u8 = 0b0010_0000; // Half carry flag
-    const FLAG_C: u8 = 0b0001_0000; // Carry flag
-
-    /// Gets the Zero flag (Z)
+    // Register pair getters
     #[inline]
-    pub fn flag_z(&self) -> bool {
-        (self.f & Self::FLAG_Z) != 0
+    pub fn af(&self) -> u16 {
+        ((self.a as u16) << 8) | (self.f as u16)
     }
 
-    /// Sets the Zero flag (Z)
     #[inline]
+    pub fn bc(&self) -> u16 {
+        ((self.b as u16) << 8) | (self.c as u16)
+    }
+
+    #[inline]
+    pub fn de(&self) -> u16 {
+        ((self.d as u16) << 8) | (self.e as u16)
+    }
+
+    #[inline]
+    pub fn hl(&self) -> u16 {
+        ((self.h as u16) << 8) | (self.l as u16)
+    }
+
+    #[inline]
+    pub fn sp(&self) -> u16 {
+        self.sp
+    }
+
+    #[inline]
+    pub fn pc(&self) -> u16 {
+        self.pc
+    }
+
+    // Register pair setters
+    pub fn set_af(&mut self, value: u16) {
+        self.a = (value >> 8) as u8;
+        self.f = (value & 0xF0) as u8; // Lower 4 bits always 0
+    }
+
+    pub fn set_bc(&mut self, value: u16) {
+        self.b = (value >> 8) as u8;
+        self.c = (value & 0xFF) as u8;
+    }
+
+    pub fn set_de(&mut self, value: u16) {
+        self.d = (value >> 8) as u8;
+        self.e = (value & 0xFF) as u8;
+    }
+
+    pub fn set_hl(&mut self, value: u16) {
+        self.h = (value >> 8) as u8;
+        self.l = (value & 0xFF) as u8;
+    }
+
+    pub fn set_sp(&mut self, value: u16) {
+        self.sp = value;
+    }
+
+    pub fn set_pc(&mut self, value: u16) {
+        self.pc = value;
+    }
+
+    // Flag constants
+    const FLAG_Z: u8 = 0b1000_0000; // Zero flag
+    const FLAG_N: u8 = 0b0100_0000; // Subtract flag
+    const FLAG_H: u8 = 0b0010_0000; // Half-carry flag
+    const FLAG_C: u8 = 0b0001_0000; // Carry flag
+
+    // Flag getters
+    pub fn flag_z(&self) -> bool {
+        self.f & Self::FLAG_Z != 0
+    }
+
     pub fn set_flag_z(&mut self, value: bool) {
         if value {
             self.f |= Self::FLAG_Z;
@@ -227,14 +248,10 @@ impl State {
         }
     }
 
-    /// Gets the Subtract flag (N)
-    #[inline]
     pub fn flag_n(&self) -> bool {
-        (self.f & Self::FLAG_N) != 0
+        self.f & Self::FLAG_N != 0
     }
 
-    /// Sets the Subtract flag (N)
-    #[inline]
     pub fn set_flag_n(&mut self, value: bool) {
         if value {
             self.f |= Self::FLAG_N;
@@ -243,14 +260,10 @@ impl State {
         }
     }
 
-    /// Gets the Half Carry flag (H)
-    #[inline]
     pub fn flag_h(&self) -> bool {
-        (self.f & Self::FLAG_H) != 0
+        self.f & Self::FLAG_H != 0
     }
 
-    /// Sets the Half Carry flag (H)
-    #[inline]
     pub fn set_flag_h(&mut self, value: bool) {
         if value {
             self.f |= Self::FLAG_H;
@@ -259,14 +272,10 @@ impl State {
         }
     }
 
-    /// Gets the Carry flag (C)
-    #[inline]
     pub fn flag_c(&self) -> bool {
-        (self.f & Self::FLAG_C) != 0
+        self.f & Self::FLAG_C != 0
     }
 
-    /// Sets the Carry flag (C)
-    #[inline]
     pub fn set_flag_c(&mut self, value: bool) {
         if value {
             self.f |= Self::FLAG_C;
@@ -275,6 +284,44 @@ impl State {
         }
     }
 }
+
+impl Default for GameBoy<Mmu> {
+    fn default() -> Self {
+        // Create a dummy ROM ONLY cartridge for production use
+        let mut rom = vec![0; 64 * 1024]; // 64KB
+        rom[0x0147] = 0x00; // ROM ONLY
+        rom[0x0148] = 0x01; // 64 KiB
+        rom[0x0149] = 0x00; // No RAM
+
+        // Calculate header checksum
+        let mut checksum: u8 = 0;
+        for &byte in &rom[0x0134..=0x014C] {
+            checksum = checksum.wrapping_sub(byte).wrapping_sub(1);
+        }
+        rom[0x014D] = checksum;
+
+        let cartridge = Cartridge::from_bytes(rom).expect("Failed to create dummy cartridge");
+        GameBoy::with_cartridge(cartridge)
+    }
+}
+
+// Default implementation for tests uses FlatMemory
+impl Default for GameBoy<FlatMemory> {
+    fn default() -> Self {
+        GameBoy::with_memory(FlatMemory::new())
+    }
+}
+
+impl GameBoy<FlatMemory> {
+    /// Create a new Game Boy instance with flat memory (for testing)
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+/// Type alias for backward compatibility with tests
+/// Uses FlatMemory for simple, writable memory without banking complexities
+pub type State = GameBoy<FlatMemory>;
 
 /// Update timers based on cycles executed
 ///
@@ -356,7 +403,7 @@ mod tests {
         let mut state = State::new();
 
         state.set_af(0xABCD);
-        assert_eq!(state.af(), 0xABCD);
+        assert_eq!(state.af(), 0xABC0); // Lower 4 bits of F are always 0
 
         state.set_bc(0x1234);
         assert_eq!(state.bc(), 0x1234);

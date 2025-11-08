@@ -2,4 +2,6 @@
 pub mod cartridge;
 pub mod instructions;
 pub mod io;
+pub mod memory;
+pub mod mmu;
 pub mod system;
