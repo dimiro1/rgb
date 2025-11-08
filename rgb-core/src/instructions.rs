@@ -564,7 +564,7 @@ pub fn dec_l(state: &mut State) {
 }
 
 /// Rotate left circular (RLC) - rotates value left, bit 7 goes to carry and bit 0
-fn rlc_8bit(value: u8, state: &mut State) -> u8 {
+fn rlc_byte(value: u8, state: &mut State) -> u8 {
     let bit7 = (value & 0x80) != 0;
     let result = (value << 1) | (if bit7 { 1 } else { 0 });
 
@@ -578,47 +578,47 @@ fn rlc_8bit(value: u8, state: &mut State) -> u8 {
 
 /// Rotate register A left circular
 pub fn rlc_a(state: &mut State) {
-    state.a = rlc_8bit(state.a, state);
+    state.a = rlc_byte(state.a, state);
 }
 
 /// Rotate register B left circular
 pub fn rlc_b(state: &mut State) {
-    state.b = rlc_8bit(state.b, state);
+    state.b = rlc_byte(state.b, state);
 }
 
 /// Rotate register C left circular
 pub fn rlc_c(state: &mut State) {
-    state.c = rlc_8bit(state.c, state);
+    state.c = rlc_byte(state.c, state);
 }
 
 /// Rotate register D left circular
 pub fn rlc_d(state: &mut State) {
-    state.d = rlc_8bit(state.d, state);
+    state.d = rlc_byte(state.d, state);
 }
 
 /// Rotate register E left circular
 pub fn rlc_e(state: &mut State) {
-    state.e = rlc_8bit(state.e, state);
+    state.e = rlc_byte(state.e, state);
 }
 
 /// Rotate register H left circular
 pub fn rlc_h(state: &mut State) {
-    state.h = rlc_8bit(state.h, state);
+    state.h = rlc_byte(state.h, state);
 }
 
 /// Rotate register L left circular
 pub fn rlc_l(state: &mut State) {
-    state.l = rlc_8bit(state.l, state);
+    state.l = rlc_byte(state.l, state);
 }
 
 /// RLCA - Rotate A left circular (always resets Z flag)
 pub fn rlca(state: &mut State) {
-    state.a = rlc_8bit(state.a, state);
+    state.a = rlc_byte(state.a, state);
     state.set_flag_z(false); // RLCA always resets Z flag
 }
 
 /// Rotate right circular (RRC) - rotates value right, bit 0 goes to carry and bit 7
-fn rrc_8bit(value: u8, state: &mut State) -> u8 {
+fn rrc_byte(value: u8, state: &mut State) -> u8 {
     let bit0 = (value & 0x01) != 0;
     let result = (value >> 1) | (if bit0 { 0x80 } else { 0 });
 
@@ -632,48 +632,48 @@ fn rrc_8bit(value: u8, state: &mut State) -> u8 {
 
 /// Rotate register A right circular
 pub fn rrc_a(state: &mut State) {
-    state.a = rrc_8bit(state.a, state);
+    state.a = rrc_byte(state.a, state);
 }
 
 /// Rotate register B right circular
 pub fn rrc_b(state: &mut State) {
-    state.b = rrc_8bit(state.b, state);
+    state.b = rrc_byte(state.b, state);
 }
 
 /// Rotate register C right circular
 pub fn rrc_c(state: &mut State) {
-    state.c = rrc_8bit(state.c, state);
+    state.c = rrc_byte(state.c, state);
 }
 
 /// Rotate register D right circular
 pub fn rrc_d(state: &mut State) {
-    state.d = rrc_8bit(state.d, state);
+    state.d = rrc_byte(state.d, state);
 }
 
 /// Rotate register E right circular
 pub fn rrc_e(state: &mut State) {
-    state.e = rrc_8bit(state.e, state);
+    state.e = rrc_byte(state.e, state);
 }
 
 /// Rotate register H right circular
 pub fn rrc_h(state: &mut State) {
-    state.h = rrc_8bit(state.h, state);
+    state.h = rrc_byte(state.h, state);
 }
 
 /// Rotate register L right circular
 pub fn rrc_l(state: &mut State) {
-    state.l = rrc_8bit(state.l, state);
+    state.l = rrc_byte(state.l, state);
 }
 
 /// RRCA - Rotate A right circular (always resets Z flag)
 pub fn rrca(state: &mut State) {
-    state.a = rrc_8bit(state.a, state);
+    state.a = rrc_byte(state.a, state);
     state.set_flag_z(false); // RRCA always resets Z flag
 }
 
 /// Rotate left through carry (RL) - rotates value left through carry flag
 /// Old carry goes to bit 0, bit 7 goes to carry
-fn rl_8bit(value: u8, state: &mut State) -> u8 {
+fn rl_byte(value: u8, state: &mut State) -> u8 {
     let bit7 = (value & 0x80) != 0;
     let old_carry = if state.flag_c() { 1 } else { 0 };
     let result = (value << 1) | old_carry;
@@ -688,48 +688,48 @@ fn rl_8bit(value: u8, state: &mut State) -> u8 {
 
 /// Rotate register A left through carry
 pub fn rl_a(state: &mut State) {
-    state.a = rl_8bit(state.a, state);
+    state.a = rl_byte(state.a, state);
 }
 
 /// Rotate register B left through carry
 pub fn rl_b(state: &mut State) {
-    state.b = rl_8bit(state.b, state);
+    state.b = rl_byte(state.b, state);
 }
 
 /// Rotate register C left through carry
 pub fn rl_c(state: &mut State) {
-    state.c = rl_8bit(state.c, state);
+    state.c = rl_byte(state.c, state);
 }
 
 /// Rotate register D left through carry
 pub fn rl_d(state: &mut State) {
-    state.d = rl_8bit(state.d, state);
+    state.d = rl_byte(state.d, state);
 }
 
 /// Rotate register E left through carry
 pub fn rl_e(state: &mut State) {
-    state.e = rl_8bit(state.e, state);
+    state.e = rl_byte(state.e, state);
 }
 
 /// Rotate register H left through carry
 pub fn rl_h(state: &mut State) {
-    state.h = rl_8bit(state.h, state);
+    state.h = rl_byte(state.h, state);
 }
 
 /// Rotate register L left through carry
 pub fn rl_l(state: &mut State) {
-    state.l = rl_8bit(state.l, state);
+    state.l = rl_byte(state.l, state);
 }
 
 /// RLA - Rotate A left through carry (always resets Z flag)
 pub fn rla(state: &mut State) {
-    state.a = rl_8bit(state.a, state);
+    state.a = rl_byte(state.a, state);
     state.set_flag_z(false); // RLA always resets Z flag
 }
 
 /// Rotate right through carry (RR) - rotates value right through carry flag
 /// Old carry goes to bit 7, bit 0 goes to carry
-fn rr_8bit(value: u8, state: &mut State) -> u8 {
+fn rr_byte(value: u8, state: &mut State) -> u8 {
     let bit0 = (value & 0x01) != 0;
     let old_carry = if state.flag_c() { 0x80 } else { 0 };
     let result = (value >> 1) | old_carry;
@@ -744,42 +744,42 @@ fn rr_8bit(value: u8, state: &mut State) -> u8 {
 
 /// Rotate register A right through carry
 pub fn rr_a(state: &mut State) {
-    state.a = rr_8bit(state.a, state);
+    state.a = rr_byte(state.a, state);
 }
 
 /// Rotate register B right through carry
 pub fn rr_b(state: &mut State) {
-    state.b = rr_8bit(state.b, state);
+    state.b = rr_byte(state.b, state);
 }
 
 /// Rotate register C right through carry
 pub fn rr_c(state: &mut State) {
-    state.c = rr_8bit(state.c, state);
+    state.c = rr_byte(state.c, state);
 }
 
 /// Rotate register D right through carry
 pub fn rr_d(state: &mut State) {
-    state.d = rr_8bit(state.d, state);
+    state.d = rr_byte(state.d, state);
 }
 
 /// Rotate register E right through carry
 pub fn rr_e(state: &mut State) {
-    state.e = rr_8bit(state.e, state);
+    state.e = rr_byte(state.e, state);
 }
 
 /// Rotate register H right through carry
 pub fn rr_h(state: &mut State) {
-    state.h = rr_8bit(state.h, state);
+    state.h = rr_byte(state.h, state);
 }
 
 /// Rotate register L right through carry
 pub fn rr_l(state: &mut State) {
-    state.l = rr_8bit(state.l, state);
+    state.l = rr_byte(state.l, state);
 }
 
 /// RRA - Rotate A right through carry (always resets Z flag)
 pub fn rra(state: &mut State) {
-    state.a = rr_8bit(state.a, state);
+    state.a = rr_byte(state.a, state);
     state.set_flag_z(false); // RRA always resets Z flag
 }
 
