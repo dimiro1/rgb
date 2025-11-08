@@ -198,8 +198,24 @@ fn cp_a(value: u8, state: &mut State) {
     // Note: A register is NOT modified (that's the difference from SUB)
 }
 
-/// Pop 16-bit value from stack (little-endian)
-fn pop_16bit(state: &mut State) -> u16 {
+/// Read immediate byte from PC and advance PC
+fn read_immediate_byte(state: &mut State) -> u8 {
+    let value = state.read(state.pc);
+    state.pc += 1;
+    value
+}
+
+/// Read immediate 16-bit word from PC and advance PC (little-endian)
+fn read_immediate_word(state: &mut State) -> u16 {
+    let low = state.read(state.pc);
+    state.pc += 1;
+    let high = state.read(state.pc);
+    state.pc += 1;
+    ((high as u16) << 8) | (low as u16)
+}
+
+/// Pop word (16-bit) value from stack (little-endian)
+fn pop_word(state: &mut State) -> u16 {
     // Pop low byte
     let low = state.read(state.sp);
     state.sp = state.sp.wrapping_add(1);
@@ -214,7 +230,7 @@ fn pop_16bit(state: &mut State) -> u16 {
 
 /// Return from subroutine - pop PC from stack
 fn ret(state: &mut State) {
-    state.pc = pop_16bit(state);
+    state.pc = pop_word(state);
 }
 
 /// Return from subroutine if Z flag is clear (NZ)
@@ -233,46 +249,42 @@ pub fn ret_nc(state: &mut State) {
 
 /// Pop 16-bit value from stack into BC register pair
 pub fn pop_bc(state: &mut State) {
-    let value = pop_16bit(state);
+    let value = pop_word(state);
     state.c = value as u8; // Low byte
     state.b = (value >> 8) as u8; // High byte
 }
 
 /// Pop 16-bit value from stack into DE register pair
 pub fn pop_de(state: &mut State) {
-    let value = pop_16bit(state);
+    let value = pop_word(state);
     state.e = value as u8; // Low byte
     state.d = (value >> 8) as u8; // High byte
 }
 
 /// Jump to absolute 16-bit address
 pub fn jp(state: &mut State) {
-    // Read 16-bit address (little-endian)
-    let low = state.read(state.pc);
-    state.pc += 1;
-    let high = state.read(state.pc);
-    state.pc += 1;
-
-    // Set PC to the absolute address
-    state.pc = ((high as u16) << 8) | (low as u16);
+    let address = read_immediate_word(state);
+    state.pc = address;
 }
 
 /// Jump to absolute address if Z flag is clear (NZ)
 pub fn jp_nz(state: &mut State) {
-    // Read 16-bit address (little-endian)
-    let low = state.read(state.pc);
-    state.pc += 1;
-    let high = state.read(state.pc);
-    state.pc += 1;
-
+    let address = read_immediate_word(state);
     if !state.flag_z() {
-        // Set PC to the absolute address
-        state.pc = ((high as u16) << 8) | (low as u16);
+        state.pc = address;
     }
 }
 
-/// Push 16-bit value onto stack (little-endian)
-fn push_16bit(value: u16, state: &mut State) {
+/// Jump to absolute address if C flag is clear (NC)
+pub fn jp_nc(state: &mut State) {
+    let address = read_immediate_word(state);
+    if !state.flag_c() {
+        state.pc = address;
+    }
+}
+
+/// Push word (16-bit) value onto stack (little-endian)
+fn push_word(value: u16, state: &mut State) {
     // Push high byte first
     state.sp = state.sp.wrapping_sub(1);
     state.write(state.sp, (value >> 8) as u8);
@@ -285,7 +297,7 @@ fn push_16bit(value: u16, state: &mut State) {
 /// Call subroutine - push return address and jump to address
 fn call(state: &mut State) {
     // Push return address (PC + 2, after reading the 2-byte address)
-    push_16bit(state.pc + 2, state);
+    push_word(state.pc + 2, state);
     // Jump to the target address
     jp(state);
 }
@@ -302,12 +314,12 @@ pub fn call_nz(state: &mut State) {
 
 /// RST 08h - Push PC and jump to address 0x0008
 pub fn rst_08(state: &mut State) {
-    push_16bit(state.pc, state);
+    push_word(state.pc, state);
     state.pc = 0x0008;
 }
 
-/// Increment an 8-bit value by 1 and update flags accordingly
-fn inc_8bit(value: u8, state: &mut State) -> u8 {
+/// Increment a byte value by 1 and update flags accordingly
+fn inc_byte(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
     state.set_flag_z(result == 0);
     state.set_flag_n(false);
@@ -317,41 +329,41 @@ fn inc_8bit(value: u8, state: &mut State) -> u8 {
 
 /// Increment the register A by 1 and update flags accordingly
 pub fn inc_a(state: &mut State) {
-    state.a = inc_8bit(state.a, state);
+    state.a = inc_byte(state.a, state);
 }
 
 // Increment the register B by 1 and update flags accordingly
 pub fn inc_b(state: &mut State) {
-    state.b = inc_8bit(state.b, state);
+    state.b = inc_byte(state.b, state);
 }
 
 // Increment the register C by 1 and update flags accordingly
 pub fn inc_c(state: &mut State) {
-    state.c = inc_8bit(state.c, state);
+    state.c = inc_byte(state.c, state);
 }
 
 /// Increment the register D by 1 and update flags accordingly
 pub fn inc_d(state: &mut State) {
-    state.d = inc_8bit(state.d, state);
+    state.d = inc_byte(state.d, state);
 }
 
 /// Increment the register E by 1 and update flags accordingly
 pub fn inc_e(state: &mut State) {
-    state.e = inc_8bit(state.e, state);
+    state.e = inc_byte(state.e, state);
 }
 
 /// Increment the register H by 1 and update flags accordingly
 pub fn inc_h(state: &mut State) {
-    state.h = inc_8bit(state.h, state);
+    state.h = inc_byte(state.h, state);
 }
 
 /// Increment the register L by 1 and update flags accordingly
 pub fn inc_l(state: &mut State) {
-    state.l = inc_8bit(state.l, state);
+    state.l = inc_byte(state.l, state);
 }
 
-/// Decrement an 8-bit value by 1 and update flags accordingly
-fn dec_8bit(value: u8, state: &mut State) -> u8 {
+/// Decrement a byte value by 1 and update flags accordingly
+fn dec_byte(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_sub(1);
     state.set_flag_z(result == 0);
     state.set_flag_n(true);
@@ -361,37 +373,37 @@ fn dec_8bit(value: u8, state: &mut State) -> u8 {
 
 /// Decrement the register A by 1 and update flags accordingly
 pub fn dec_a(state: &mut State) {
-    state.a = dec_8bit(state.a, state);
+    state.a = dec_byte(state.a, state);
 }
 
 /// Decrement the register B by 1 and update flags accordingly
 pub fn dec_b(state: &mut State) {
-    state.b = dec_8bit(state.b, state);
+    state.b = dec_byte(state.b, state);
 }
 
 /// Decrement the register C by 1 and update flags accordingly
 pub fn dec_c(state: &mut State) {
-    state.c = dec_8bit(state.c, state);
+    state.c = dec_byte(state.c, state);
 }
 
 /// Decrement the register D by 1 and update flags accordingly
 pub fn dec_d(state: &mut State) {
-    state.d = dec_8bit(state.d, state);
+    state.d = dec_byte(state.d, state);
 }
 
 /// Decrement the register E by 1 and update flags accordingly
 pub fn dec_e(state: &mut State) {
-    state.e = dec_8bit(state.e, state);
+    state.e = dec_byte(state.e, state);
 }
 
 /// Decrement the register H by 1 and update flags accordingly
 pub fn dec_h(state: &mut State) {
-    state.h = dec_8bit(state.h, state);
+    state.h = dec_byte(state.h, state);
 }
 
 /// Decrement the register L by 1 and update flags accordingly
 pub fn dec_l(state: &mut State) {
-    state.l = dec_8bit(state.l, state);
+    state.l = dec_byte(state.l, state);
 }
 
 /// Rotate left circular (RLC) - rotates value left, bit 7 goes to carry and bit 0
@@ -617,16 +629,14 @@ pub fn rra(state: &mut State) {
 /// JR - Jump relative (unconditional)
 /// Adds a signed 8-bit offset to PC
 pub fn jr(state: &mut State) {
-    let offset = state.read(state.pc) as i8;
-    state.pc += 1;
+    let offset = read_immediate_byte(state) as i8;
     // Add the signed offset to PC
     state.pc = state.pc.wrapping_add(offset as u16);
 }
 
 /// JR NZ - Jump relative if not zero (Z flag is not set)
 pub fn jr_nz(state: &mut State) {
-    let offset = state.read(state.pc) as i8;
-    state.pc += 1;
+    let offset = read_immediate_byte(state) as i8;
 
     if !state.flag_z() {
         state.pc = state.pc.wrapping_add(offset as u16);
@@ -663,8 +673,7 @@ pub fn daa(state: &mut State) {
 
 /// JR Z - Jump relative if zero (Z flag is set)
 pub fn jr_z(state: &mut State) {
-    let offset = state.read(state.pc) as i8;
-    state.pc += 1;
+    let offset = read_immediate_byte(state) as i8;
 
     if state.flag_z() {
         state.pc = state.pc.wrapping_add(offset as u16);
@@ -673,8 +682,7 @@ pub fn jr_z(state: &mut State) {
 
 /// JR NC - Jump relative if not carry (C flag is not set)
 pub fn jr_nc(state: &mut State) {
-    let offset = state.read(state.pc) as i8;
-    state.pc += 1;
+    let offset = read_immediate_byte(state) as i8;
 
     if !state.flag_c() {
         state.pc = state.pc.wrapping_add(offset as u16);
@@ -683,8 +691,7 @@ pub fn jr_nc(state: &mut State) {
 
 /// JR C - Jump relative if carry (C flag is set)
 pub fn jr_c(state: &mut State) {
-    let offset = state.read(state.pc) as i8;
-    state.pc += 1;
+    let offset = read_immediate_byte(state) as i8;
 
     if state.flag_c() {
         state.pc = state.pc.wrapping_add(offset as u16);
@@ -716,7 +723,7 @@ pub fn ccf(state: &mut State) {
 pub fn inc_hl_indirect(state: &mut State) {
     let addr = state.hl();
     let value = state.read(addr);
-    let result = inc_8bit(value, state);
+    let result = inc_byte(value, state);
     state.write(addr, result);
 }
 
@@ -724,7 +731,7 @@ pub fn inc_hl_indirect(state: &mut State) {
 pub fn dec_hl_indirect(state: &mut State) {
     let addr = state.hl();
     let value = state.read(addr);
-    let result = dec_8bit(value, state);
+    let result = dec_byte(value, state);
     state.write(addr, result);
 }
 
@@ -859,8 +866,7 @@ pub fn execute(state: &mut State) {
 
     // TODO: This is not fully correct, in fact the read function must take into consideration the
     // current emomory bank and other detalis.
-    let op = state.read(state.pc);
-    state.pc += 1;
+    let op = read_immediate_byte(state);
 
     match op {
         0x00 => {
@@ -895,8 +901,7 @@ pub fn execute(state: &mut State) {
         }
         0x06 => {
             /* LD B,n */
-            state.b = state.read(state.pc);
-            state.pc += 1;
+            state.b = read_immediate_byte(state);
             state.cycles += 8;
         }
         0x07 => {
@@ -936,8 +941,7 @@ pub fn execute(state: &mut State) {
         }
         0x0E => {
             /* LD C,n */
-            state.c = state.read(state.pc);
-            state.pc += 1;
+            state.c = read_immediate_byte(state);
             state.cycles += 8;
         }
         0x0F => {
@@ -978,8 +982,7 @@ pub fn execute(state: &mut State) {
         }
         0x16 => {
             /* LD D,n */
-            state.d = state.read(state.pc);
-            state.pc += 1;
+            state.d = read_immediate_byte(state);
             state.cycles += 8;
         }
         0x17 => {
@@ -1019,8 +1022,7 @@ pub fn execute(state: &mut State) {
         }
         0x1E => {
             /* LD E,n */
-            state.e = state.read(state.pc);
-            state.pc += 1;
+            state.e = read_immediate_byte(state);
             state.cycles += 8;
         }
         0x1F => {
@@ -1062,8 +1064,7 @@ pub fn execute(state: &mut State) {
         }
         0x26 => {
             /* LD H,n */
-            state.h = state.read(state.pc);
-            state.pc += 1;
+            state.h = read_immediate_byte(state);
             state.cycles += 8;
         }
         0x27 => {
@@ -1104,8 +1105,7 @@ pub fn execute(state: &mut State) {
         }
         0x2E => {
             /* LD L,n */
-            state.l = state.read(state.pc);
-            state.pc += 1;
+            state.l = read_immediate_byte(state);
             state.cycles += 8;
         }
         0x2F => {
@@ -1147,8 +1147,7 @@ pub fn execute(state: &mut State) {
         }
         0x36 => {
             /* LD (HL),n */
-            let value = state.read(state.pc);
-            state.pc += 1;
+            let value = read_immediate_byte(state);
             state.write(state.hl(), value);
             state.cycles += 12;
         }
@@ -1190,9 +1189,8 @@ pub fn execute(state: &mut State) {
         }
         0x3E => {
             /* LD A,n */
-            state.a = state.read(state.pc);
+            state.a = read_immediate_byte(state);
             state.cycles += 8;
-            state.pc += 1;
         }
         0x3F => {
             /* CCF */
@@ -1878,8 +1876,7 @@ pub fn execute(state: &mut State) {
         }
         0xCE => {
             /* ADC A,n */
-            let value = state.read(state.pc);
-            state.pc += 1;
+            let value = read_immediate_byte(state);
             adc_a(value, state);
             state.cycles += 8;
         }
@@ -1898,6 +1895,12 @@ pub fn execute(state: &mut State) {
             /* POP DE */
             pop_de(state);
             state.cycles += 12;
+        }
+        0xD2 => {
+            /* JP NC */
+            jp_nc(state);
+            // Conditional jump: 12 cycles if not taken, 16 cycles if taken
+            state.cycles += if !state.flag_c() { 16 } else { 12 };
         }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
@@ -2779,6 +2782,35 @@ mod tests {
         assert_eq!(state.pc, 0x152);
     }
 
+    #[test]
+    fn test_jp_nc_jumps_when_c_clear() {
+        let mut state = State::new();
+        state.pc = 0x200;
+        state.set_flag_c(false);
+
+        state.write(0x200, 0x00); // Low byte
+        state.write(0x201, 0x30); // High byte
+
+        jp_nc(&mut state);
+
+        assert_eq!(state.pc, 0x3000);
+    }
+
+    #[test]
+    fn test_jp_nc_no_jump_when_c_set() {
+        let mut state = State::new();
+        state.pc = 0x200;
+        state.set_flag_c(true);
+
+        state.write(0x200, 0x00); // Low byte
+        state.write(0x201, 0x30); // High byte
+
+        jp_nc(&mut state);
+
+        // PC should be incremented by 2 (past the address bytes) but not jump
+        assert_eq!(state.pc, 0x202);
+    }
+
     // Tests for CALL
     #[test]
     fn test_call_pushes_return_address_and_jumps() {
@@ -2838,11 +2870,11 @@ mod tests {
     }
 
     #[test]
-    fn test_push_16bit_little_endian() {
+    fn test_push_word_little_endian() {
         let mut state = State::new();
         state.sp = 0x2000;
 
-        push_16bit(0xABCD, &mut state);
+        push_word(0xABCD, &mut state);
 
         // SP decremented by 2
         assert_eq!(state.sp, 0x1FFE);
@@ -2871,7 +2903,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inc_8bit_normal() {
+    fn test_inc_byte_normal() {
         let mut state = State::new();
         state.a = 0x42;
 
@@ -2884,7 +2916,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inc_8bit_zero() {
+    fn test_inc_byte_zero() {
         let mut state = State::new();
         state.b = 0xFF;
 
@@ -2897,7 +2929,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inc_8bit_half_carry() {
+    fn test_inc_byte_half_carry() {
         let mut state = State::new();
         state.c = 0x0F;
 
@@ -2910,7 +2942,7 @@ mod tests {
     }
 
     #[test]
-    fn test_inc_8bit_all_registers() {
+    fn test_inc_byte_all_registers() {
         let mut state = State::new();
 
         state.a = 0x00;
@@ -2975,7 +3007,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dec_8bit_normal() {
+    fn test_dec_byte_normal() {
         let mut state = State::new();
         state.a = 0x42;
 
@@ -2988,7 +3020,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dec_8bit_zero() {
+    fn test_dec_byte_zero() {
         let mut state = State::new();
         state.b = 0x01;
 
@@ -3001,7 +3033,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dec_8bit_half_borrow() {
+    fn test_dec_byte_half_borrow() {
         let mut state = State::new();
         state.c = 0x10;
 
@@ -3014,7 +3046,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dec_8bit_underflow() {
+    fn test_dec_byte_underflow() {
         let mut state = State::new();
         state.d = 0x00;
 
@@ -3027,7 +3059,7 @@ mod tests {
     }
 
     #[test]
-    fn test_dec_8bit_all_registers() {
+    fn test_dec_byte_all_registers() {
         let mut state = State::new();
 
         state.a = 0x02;
