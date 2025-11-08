@@ -16,6 +16,7 @@ pub struct State {
     pub halt: bool,         // CPU is halted
     pub ei_delay: bool,     // EI takes effect after next instruction
     pub di_delay: bool,     // DI takes effect after next instruction
+    pub cycles: u32,        // Total CPU cycles executed
 }
 
 fn reset_cpu(state: &mut State) {
@@ -83,6 +84,7 @@ impl Default for State {
             halt: false,
             ei_delay: false,
             di_delay: false,
+            cycles: 0,
         };
         reset_cpu(&mut state);
         reset_memory(&mut state);

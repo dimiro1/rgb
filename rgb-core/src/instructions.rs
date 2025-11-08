@@ -57,6 +57,9 @@ fn service_interrupts(state: &mut State) -> bool {
     // Jump to interrupt vector
     state.pc = vector;
 
+    // Interrupt servicing takes 20 cycles
+    state.cycles += 20;
+
     true
 }
 
@@ -617,36 +620,46 @@ pub fn execute(state: &mut State) {
     state.pc += 1;
 
     match op {
-        0x00 => { /* NOP */ }
+        0x00 => {
+            /* NOP */
+            state.cycles += 4;
+        }
         0x01 => {
             /* LD BC,n */
             state.set_bc(state.read_word(state.pc));
             state.pc += 2;
+            state.cycles += 12;
         }
         0x02 => {
             /* LD (BC),A */
             state.write(state.bc(), state.a);
+            state.cycles += 8;
         }
         0x03 => {
             /* INC BC */
             inc_bc(state);
+            state.cycles += 8;
         }
         0x04 => {
             /* INC B */
             inc_b(state);
+            state.cycles += 4;
         }
         0x05 => {
             /* DEC B */
             dec_b(state);
+            state.cycles += 4;
         }
         0x06 => {
             /* LD B,n */
             state.b = state.read(state.pc);
             state.pc += 1;
+            state.cycles += 8;
         }
         0x07 => {
             /* RLCA */
             rlca(state);
+            state.cycles += 4;
         }
         0x08 => {
             /* LD (n),SP */
@@ -656,441 +669,563 @@ pub fn execute(state: &mut State) {
         0x09 => {
             /* ADD HL,BC */
             add_hl_bc(state);
+            state.cycles += 8;
         }
         0x0A => {
             /* LD A,(BC) */
             state.a = state.read(state.bc());
+            state.cycles += 8;
         }
         0x0B => {
             /* DEC BC */
             state.set_bc(state.bc().wrapping_sub(1));
+            state.cycles += 8;
         }
         0x0C => {
             /* INC C */
             inc_c(state);
+            state.cycles += 4;
         }
         0x0D => {
             /* DEC C */
             dec_c(state);
+            state.cycles += 4;
         }
         0x0E => {
             /* LD C,n */
             state.c = state.read(state.pc);
             state.pc += 1;
+            state.cycles += 8;
         }
         0x0F => {
             /* RRCA */
             rrca(state);
+            state.cycles += 4;
         }
         0x10 => {
             /* STOP */
             state.pc += 1;
+            state.cycles += 4;
         }
         0x11 => {
             /* LD DE,n */
             state.set_de(state.read_word(state.pc));
             state.pc += 2;
+            state.cycles += 12;
         }
         0x12 => {
             /* LD (DE),A */
             state.write(state.de(), state.a);
+            state.cycles += 8;
         }
         0x13 => {
             /* INC DE */
             inc_de(state);
+            state.cycles += 8;
         }
         0x14 => {
             /* INC D */
             inc_d(state);
+            state.cycles += 4;
         }
         0x15 => {
             /* DEC D */
             dec_d(state);
+            state.cycles += 4;
         }
         0x16 => {
             /* LD D,n */
             state.d = state.read(state.pc);
             state.pc += 1;
+            state.cycles += 8;
         }
         0x17 => {
             /* RLA */
             rla(state);
+            state.cycles += 4;
         }
         0x18 => {
             /* JR */
             jr(state);
+            state.cycles += 8;
         }
         0x19 => {
             /* ADD HL,DE */
             add_hl_de(state);
+            state.cycles += 8;
         }
         0x1A => {
             /* LD A,(DE) */
             state.a = state.read(state.de());
+            state.cycles += 8;
         }
         0x1B => {
             /* DEC DE */
             dec_de(state);
+            state.cycles += 8;
         }
         0x1C => {
             /* INC E */
             inc_e(state);
+            state.cycles += 4;
         }
         0x1D => {
             /* DEC E */
             dec_e(state);
+            state.cycles += 4;
         }
         0x1E => {
             /* LD E,n */
             state.e = state.read(state.pc);
             state.pc += 1;
+            state.cycles += 8;
         }
         0x1F => {
             /* RRA */
             rra(state);
+            state.cycles += 4;
         }
         0x20 => {
             /* JR NZ */
             jr_nz(state);
+            state.cycles += 8;
         }
         0x21 => {
             /* LD HL,n */
             state.set_hl(state.read_word(state.pc));
             state.pc += 2;
+            state.cycles += 12;
         }
         0x22 => {
             /* LDI (HL),A */
             state.write(state.hl(), state.a);
             state.set_hl(state.hl().wrapping_add(1));
+            state.cycles += 8;
         }
         0x23 => {
             /* INC HL */
             inc_hl(state);
+            state.cycles += 8;
         }
         0x24 => {
             /* INC H */
             inc_h(state);
+            state.cycles += 4;
         }
         0x25 => {
             /* DEC H */
             dec_h(state);
+            state.cycles += 4;
         }
         0x26 => {
             /* LD H,n */
             state.h = state.read(state.pc);
             state.pc += 1;
+            state.cycles += 8;
         }
         0x27 => {
             /* DAA */
             daa(state);
+            state.cycles += 4;
         }
         0x28 => {
             /* JR Z */
             jr_z(state);
+            state.cycles += 8;
         }
         0x29 => {
             /* ADD HL,HL */
             add_hl_hl(state);
+            state.cycles += 8;
         }
         0x2A => {
             /* LDI A,(HL) */
             state.a = state.read(state.hl());
             state.set_hl(state.hl().wrapping_add(1));
+            state.cycles += 8;
         }
         0x2B => {
             /* DEC HL */
             dec_hl(state);
+            state.cycles += 8;
         }
         0x2C => {
             /* INC L */
             inc_l(state);
+            state.cycles += 4;
         }
         0x2D => {
             /* DEC L */
             dec_l(state);
+            state.cycles += 4;
         }
         0x2E => {
             /* LD L,n */
             state.l = state.read(state.pc);
             state.pc += 1;
+            state.cycles += 8;
         }
         0x2F => {
             /* CPL */
             cpl(state);
+            state.cycles += 4;
         }
         0x30 => {
             /* JR NC */
             jr_nc(state);
+            state.cycles += 8;
         }
         0x31 => {
             /* LD SP,n */
             state.set_sp(state.read_word(state.pc));
             state.pc += 2;
+            state.cycles += 12;
         }
         0x32 => {
             /* LDD (HL),A */
             state.write(state.hl(), state.a);
             state.set_hl(state.hl().wrapping_sub(1));
+            state.cycles += 8;
         }
         0x33 => {
             /* INC SP */
             inc_sp(state);
+            state.cycles += 8;
         }
         0x34 => {
             /* INC (HL) */
             inc_hl_indirect(state);
+            state.cycles += 12;
         }
         0x35 => {
             /* DEC (HL) */
             dec_hl_indirect(state);
+            state.cycles += 12;
         }
         0x36 => {
             /* LD (HL),n */
             let value = state.read(state.pc);
             state.pc += 1;
             state.write(state.hl(), value);
+            state.cycles += 12;
         }
         0x37 => {
             /* SCF */
             scf(state);
+            state.cycles += 4;
         }
         0x38 => {
             /* JR C */
             jr_c(state);
+            state.cycles += 8;
         }
         0x39 => {
             /* ADD HL,SP */
             add_hl_sp(state);
+            state.cycles += 8;
         }
         0x3A => {
             /* LDD A,(HL) */
             state.a = state.read(state.hl());
             state.set_hl(state.hl().wrapping_sub(1));
+            state.cycles += 8;
         }
         0x3B => {
             /* DEC SP */
             dec_sp(state);
+            state.cycles += 8;
         }
         0x3C => {
             /* INC A */
             inc_a(state);
+            state.cycles += 4;
         }
         0x3D => {
             /* DEC A */
             dec_a(state);
+            state.cycles += 4;
         }
         0x3E => {
             /* LD A,n */
             state.a = state.read(state.pc);
+            state.cycles += 8;
             state.pc += 1;
         }
         0x3F => {
             /* CCF */
             ccf(state);
+            state.cycles += 4;
         }
-        0x40 => { /* LD B,B */ }
+        0x40 => {
+            /* LD B,B */
+            state.cycles += 4;
+        }
         0x41 => {
             /* LD B,C */
             state.b = state.c;
+            state.cycles += 4;
         }
         0x42 => {
             /* LD B,D */
             state.b = state.d;
+            state.cycles += 4;
         }
         0x43 => {
             /* LD B,E */
             state.b = state.e;
+            state.cycles += 4;
         }
         0x44 => {
             /* LD B,H */
             state.b = state.h;
+            state.cycles += 4;
         }
         0x45 => {
             /* LD B,L */
             state.b = state.l;
+            state.cycles += 4;
         }
         0x46 => {
             /* LD B,(HL) */
             state.b = state.read(state.hl());
+            state.cycles += 8;
         }
         0x47 => {
             /* LD B,A */
             state.b = state.a;
+            state.cycles += 4;
         }
         0x48 => {
             /* LD C,B */
             state.c = state.b;
+            state.cycles += 4;
         }
-        0x49 => { /* LD C,C */ }
+        0x49 => {
+            /* LD C,C */
+            state.cycles += 4;
+        }
         0x4A => {
             /* LD C,D */
             state.c = state.d;
+            state.cycles += 4;
         }
         0x4B => {
             /* LD C,E */
             state.c = state.e;
+            state.cycles += 4;
         }
         0x4C => {
             /* LD C,H */
             state.c = state.h;
+            state.cycles += 4;
         }
         0x4D => {
             /* LD C,L */
             state.c = state.l;
+            state.cycles += 4;
         }
         0x4E => {
             /* LD C,(HL) */
             state.c = state.read(state.hl());
+            state.cycles += 8;
         }
         0x4F => {
             /* LD C,A */
             state.c = state.a;
+            state.cycles += 4;
         }
         0x50 => {
             /* LD D,B */
             state.d = state.b;
+            state.cycles += 4;
         }
         0x51 => {
             /* LD D,C */
             state.d = state.c;
+            state.cycles += 4;
         }
-        0x52 => { /* LD D,D */ }
+        0x52 => {
+            /* LD D,D */
+            state.cycles += 4;
+        }
         0x53 => {
             /* LD D,E */
             state.d = state.e;
+            state.cycles += 4;
         }
         0x54 => {
             /* LD D,H */
             state.d = state.h;
+            state.cycles += 4;
         }
         0x55 => {
             /* LD D,L */
             state.d = state.l;
+            state.cycles += 4;
         }
         0x56 => {
             /* LD D,(HL) */
             state.d = state.read(state.hl());
+            state.cycles += 8;
         }
         0x57 => {
             /* LD D,A */
             state.d = state.a;
+            state.cycles += 4;
         }
         0x58 => {
             /* LD E,B */
             state.e = state.b;
+            state.cycles += 4;
         }
         0x59 => {
             /* LD E,C */
             state.e = state.c;
+            state.cycles += 4;
         }
         0x5A => {
             /* LD E,D */
             state.e = state.d;
+            state.cycles += 4;
         }
-        0x5B => { /* LD E,E */ }
+        0x5B => {
+            /* LD E,E */
+            state.cycles += 4;
+        }
         0x5C => {
             /* LD E,H */
             state.e = state.h;
+            state.cycles += 4;
         }
         0x5D => {
             /* LD E,L */
             state.e = state.l;
+            state.cycles += 4;
         }
         0x5E => {
             /* LD E,(HL) */
             state.e = state.read(state.hl());
+            state.cycles += 8;
         }
         0x5F => {
             /* LD E,A */
             state.e = state.a;
+            state.cycles += 4;
         }
         0x60 => {
             /* LD H,B */
             state.h = state.b;
+            state.cycles += 4;
         }
         0x61 => {
             /* LD H,C */
             state.h = state.c;
+            state.cycles += 4;
         }
         0x62 => {
             /* LD H,D */
             state.h = state.d;
+            state.cycles += 4;
         }
         0x63 => {
             /* LD H,E */
             state.h = state.e;
+            state.cycles += 4;
         }
-        0x64 => { /* LD H,H */ }
+        0x64 => {
+            /* LD H,H */
+            state.cycles += 4;
+        }
         0x65 => {
             /* LD H,L */
             state.h = state.l;
+            state.cycles += 4;
         }
         0x66 => {
             /* LD H,(HL) */
             state.h = state.read(state.hl());
+            state.cycles += 8;
         }
         0x67 => {
             /* LD H,A */
             state.h = state.a;
+            state.cycles += 4;
         }
         0x68 => {
             /* LD L,B */
             state.l = state.b;
+            state.cycles += 4;
         }
         0x69 => {
             /* LD L,C */
             state.l = state.c;
+            state.cycles += 4;
         }
         0x6A => {
             /* LD L,D */
             state.l = state.d;
+            state.cycles += 4;
         }
         0x6B => {
             /* LD L,E */
             state.l = state.e;
+            state.cycles += 4;
         }
         0x6C => {
             /* LD L,H */
             state.l = state.h;
+            state.cycles += 4;
         }
-        0x6D => { /* LD L,L */ }
+        0x6D => {
+            /* LD L,L */
+            state.cycles += 4;
+        }
         0x6E => {
             /* LD L,(HL) */
             state.l = state.read(state.hl());
+            state.cycles += 8;
         }
         0x6F => {
             /* LD L,A */
             state.l = state.a;
+            state.cycles += 4;
         }
         0x70 => {
             /* LD (HL),B */
             state.write(state.hl(), state.b);
+            state.cycles += 8;
         }
         0x71 => {
             /* LD (HL),C */
             state.write(state.hl(), state.c);
+            state.cycles += 8;
         }
         0x72 => {
             /* LD (HL),D */
             state.write(state.hl(), state.d);
+            state.cycles += 8;
         }
         0x73 => {
             /* LD (HL),E */
             state.write(state.hl(), state.e);
+            state.cycles += 8;
         }
         0x74 => {
             /* LD (HL),H */
             state.write(state.hl(), state.h);
+            state.cycles += 8;
         }
         0x75 => {
             /* LD (HL),L */
             state.write(state.hl(), state.l);
+            state.cycles += 8;
         }
         0x76 => {
             /* HALT */
             if state.ime {
                 state.halt = true;
             }
+            state.cycles += 4;
         }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
