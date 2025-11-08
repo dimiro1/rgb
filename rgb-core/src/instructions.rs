@@ -198,8 +198,8 @@ fn cp_a(value: u8, state: &mut State) {
     // Note: A register is NOT modified (that's the difference from SUB)
 }
 
-/// Return from subroutine - pop PC from stack
-fn ret(state: &mut State) {
+/// Pop 16-bit value from stack (little-endian)
+fn pop_16bit(state: &mut State) -> u16 {
     // Pop low byte
     let low = state.read(state.sp);
     state.sp = state.sp.wrapping_add(1);
@@ -208,8 +208,13 @@ fn ret(state: &mut State) {
     let high = state.read(state.sp);
     state.sp = state.sp.wrapping_add(1);
 
-    // Set PC to popped address (little-endian)
-    state.pc = ((high as u16) << 8) | (low as u16);
+    // Return the 16-bit value (little-endian)
+    ((high as u16) << 8) | (low as u16)
+}
+
+/// Return from subroutine - pop PC from stack
+fn ret(state: &mut State) {
+    state.pc = pop_16bit(state);
 }
 
 /// Return from subroutine if Z flag is clear (NZ)
@@ -221,13 +226,9 @@ pub fn ret_nz(state: &mut State) {
 
 /// Pop 16-bit value from stack into BC register pair
 pub fn pop_bc(state: &mut State) {
-    // Pop low byte (C)
-    state.c = state.read(state.sp);
-    state.sp = state.sp.wrapping_add(1);
-
-    // Pop high byte (B)
-    state.b = state.read(state.sp);
-    state.sp = state.sp.wrapping_add(1);
+    let value = pop_16bit(state);
+    state.c = value as u8; // Low byte
+    state.b = (value >> 8) as u8; // High byte
 }
 
 /// Jump to absolute 16-bit address
@@ -253,6 +254,35 @@ pub fn jp_nz(state: &mut State) {
     if !state.flag_z() {
         // Set PC to the absolute address
         state.pc = ((high as u16) << 8) | (low as u16);
+    }
+}
+
+/// Push 16-bit value onto stack (little-endian)
+fn push_16bit(value: u16, state: &mut State) {
+    // Push high byte first
+    state.sp = state.sp.wrapping_sub(1);
+    state.write(state.sp, (value >> 8) as u8);
+
+    // Push low byte
+    state.sp = state.sp.wrapping_sub(1);
+    state.write(state.sp, value as u8);
+}
+
+/// Call subroutine - push return address and jump to address
+fn call(state: &mut State) {
+    // Push return address (PC + 2, after reading the 2-byte address)
+    push_16bit(state.pc + 2, state);
+    // Jump to the target address
+    jp(state);
+}
+
+/// Call subroutine if Z flag is clear (NZ)
+pub fn call_nz(state: &mut State) {
+    if !state.flag_z() {
+        call(state);
+    } else {
+        // Skip the 2-byte address
+        state.pc += 2;
     }
 }
 
@@ -1815,6 +1845,17 @@ pub fn execute(state: &mut State) {
             jp(state);
             state.cycles += 16;
         }
+        0xC4 => {
+            /* CALL NZ */
+            call_nz(state);
+            // Conditional call: 12 cycles if not taken, 24 cycles if taken
+            state.cycles += if !state.flag_z() { 24 } else { 12 };
+        }
+        0xCD => {
+            /* CALL */
+            call(state);
+            state.cycles += 24;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -2640,6 +2681,79 @@ mod tests {
 
         // PC should be incremented by 2 (past the address bytes) but not jump
         assert_eq!(state.pc, 0x152);
+    }
+
+    // Tests for CALL
+    #[test]
+    fn test_call_pushes_return_address_and_jumps() {
+        let mut state = State::new();
+        state.pc = 0x100;
+        state.sp = 0xFFFE;
+
+        // Write call target address 0x8000 at PC (little-endian)
+        state.write(0x100, 0x00); // Low byte
+        state.write(0x101, 0x80); // High byte
+
+        call(&mut state);
+
+        // PC should be at target address
+        assert_eq!(state.pc, 0x8000);
+
+        // Return address (0x102) should be pushed onto stack (little-endian)
+        assert_eq!(state.sp, 0xFFFC);
+        assert_eq!(state.read(0xFFFC), 0x02); // Low byte of return address
+        assert_eq!(state.read(0xFFFD), 0x01); // High byte of return address
+    }
+
+    #[test]
+    fn test_call_nz_calls_when_z_clear() {
+        let mut state = State::new();
+        state.pc = 0x200;
+        state.sp = 0xFF00;
+        state.set_flag_z(false);
+
+        state.write(0x200, 0x34); // Low byte
+        state.write(0x201, 0x12); // High byte
+
+        call_nz(&mut state);
+
+        // Should have called (jumped and pushed return address)
+        assert_eq!(state.pc, 0x1234);
+        assert_eq!(state.sp, 0xFEFE);
+        assert_eq!(state.read(0xFEFE), 0x02); // Low byte of 0x202
+        assert_eq!(state.read(0xFEFF), 0x02); // High byte of 0x202
+    }
+
+    #[test]
+    fn test_call_nz_no_call_when_z_set() {
+        let mut state = State::new();
+        state.pc = 0x200;
+        state.sp = 0xFF00;
+        state.set_flag_z(true);
+
+        state.write(0x200, 0x34); // Low byte
+        state.write(0x201, 0x12); // High byte
+
+        call_nz(&mut state);
+
+        // Should not have called (PC advanced, SP unchanged)
+        assert_eq!(state.pc, 0x202);
+        assert_eq!(state.sp, 0xFF00);
+    }
+
+    #[test]
+    fn test_push_16bit_little_endian() {
+        let mut state = State::new();
+        state.sp = 0x2000;
+
+        push_16bit(0xABCD, &mut state);
+
+        // SP decremented by 2
+        assert_eq!(state.sp, 0x1FFE);
+
+        // Verify little-endian storage (low byte at lower address)
+        assert_eq!(state.read(0x1FFE), 0xCD); // Low byte
+        assert_eq!(state.read(0x1FFF), 0xAB); // High byte
     }
 
     #[test]
