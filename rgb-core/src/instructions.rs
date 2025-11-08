@@ -413,6 +413,68 @@ fn illegal_opcode(opcode: u8, state: &State) -> ! {
     );
 }
 
+/// RST 20h - Push PC and jump to address 0x0020
+pub fn rst_20(state: &mut State) {
+    push_word(state.pc, state);
+    state.pc = 0x0020;
+}
+
+/// RST 28h - Push PC and jump to address 0x0028
+pub fn rst_28(state: &mut State) {
+    push_word(state.pc, state);
+    state.pc = 0x0028;
+}
+
+/// ADD SP,n - Add signed immediate byte to SP
+/// Z: Reset
+/// N: Reset
+/// H: Set if carry from bit 3
+/// C: Set if carry from bit 7
+pub fn add_sp_n(state: &mut State) {
+    let offset = read_immediate_byte(state) as i8;
+    let sp = state.sp;
+    let result = sp.wrapping_add(offset as u16);
+
+    // Flags are based on the lower byte addition
+    state.set_flag_z(false);
+    state.set_flag_n(false);
+    state.set_flag_h((sp & 0xF) + ((offset as u16) & 0xF) > 0xF);
+    state.set_flag_c((sp & 0xFF) + ((offset as u16) & 0xFF) > 0xFF);
+
+    state.sp = result;
+}
+
+/// JP HL - Jump to address in HL
+pub fn jp_hl(state: &mut State) {
+    state.pc = state.hl();
+}
+
+/// LD (nn),A - Load A into memory at absolute address
+pub fn ld_nn_a(state: &mut State) {
+    let address = read_immediate_word(state);
+    state.write(address, state.a);
+}
+
+/// LDH A,(n) - Load from high memory (0xFF00 + n) into A
+pub fn ldh_a_n(state: &mut State) {
+    let offset = read_immediate_byte(state);
+    let address = 0xFF00 | (offset as u16);
+    state.a = state.read(address);
+}
+
+/// LDH A,(C) - Load from high memory (0xFF00 + C) into A
+pub fn ldh_a_c(state: &mut State) {
+    let address = 0xFF00 | (state.c as u16);
+    state.a = state.read(address);
+}
+
+/// Pop 16-bit value from stack into AF register pair
+pub fn pop_af(state: &mut State) {
+    let value = pop_word(state);
+    state.f = value as u8; // Low byte (flags)
+    state.a = (value >> 8) as u8; // High byte
+}
+
 /// Increment a byte value by 1 and update flags accordingly
 fn inc_byte(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -2093,6 +2155,75 @@ pub fn execute(state: &mut State) {
             /* PUSH HL */
             push_hl(state);
             state.cycles += 16;
+        }
+        0xE6 => {
+            /* AND n */
+            let value = read_immediate_byte(state);
+            and_a(value, state);
+            state.cycles += 8;
+        }
+        0xE7 => {
+            /* RST 20h */
+            rst_20(state);
+            state.cycles += 16;
+        }
+        0xE8 => {
+            /* ADD SP,n */
+            add_sp_n(state);
+            state.cycles += 16;
+        }
+        0xE9 => {
+            /* JP HL */
+            jp_hl(state);
+            state.cycles += 4;
+        }
+        0xEA => {
+            /* LD (nn),A */
+            ld_nn_a(state);
+            state.cycles += 16;
+        }
+        0xEB => {
+            /* Illegal opcode */
+            illegal_opcode(0xEB, state);
+        }
+        0xEC => {
+            /* Illegal opcode */
+            illegal_opcode(0xEC, state);
+        }
+        0xED => {
+            /* Illegal opcode */
+            illegal_opcode(0xED, state);
+        }
+        0xEE => {
+            /* XOR n */
+            let value = read_immediate_byte(state);
+            xor_a(value, state);
+            state.cycles += 8;
+        }
+        0xEF => {
+            /* RST 28h */
+            rst_28(state);
+            state.cycles += 16;
+        }
+        0xF0 => {
+            /* LDH A,(n) */
+            ldh_a_n(state);
+            state.cycles += 12;
+        }
+        0xF1 => {
+            /* POP AF */
+            pop_af(state);
+            state.cycles += 12;
+        }
+        0xF2 => {
+            /* LDH A,(C) */
+            ldh_a_c(state);
+            state.cycles += 8;
+        }
+        0xF3 => {
+            /* DI */
+            state.di_delay = true;
+            state.cycles += 4;
         }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
@@ -4941,5 +5072,227 @@ mod tests {
         assert_eq!(state.sp(), 0xC0FE);
         assert_eq!(state.read(0xC0FE), 0xCD); // Low byte at lower address
         assert_eq!(state.read(0xC0FF), 0xAB); // High byte at higher address
+    }
+
+    // Tests for RST 20h and RST 28h
+    #[test]
+    fn test_rst_20_pushes_pc_and_jumps() {
+        let mut state = State::new();
+        state.pc = 0xABCD;
+        state.sp = 0xFFFE;
+
+        rst_20(&mut state);
+
+        // PC should be at RST vector 0x0020
+        assert_eq!(state.pc, 0x0020);
+
+        // Return address (0xABCD) should be pushed onto stack
+        assert_eq!(state.sp, 0xFFFC);
+        assert_eq!(state.read(0xFFFC), 0xCD); // Low byte
+        assert_eq!(state.read(0xFFFD), 0xAB); // High byte
+    }
+
+    #[test]
+    fn test_rst_28_pushes_pc_and_jumps() {
+        let mut state = State::new();
+        state.pc = 0x1234;
+        state.sp = 0xFFFE;
+
+        rst_28(&mut state);
+
+        // PC should be at RST vector 0x0028
+        assert_eq!(state.pc, 0x0028);
+
+        // Return address (0x1234) should be pushed onto stack
+        assert_eq!(state.sp, 0xFFFC);
+        assert_eq!(state.read(0xFFFC), 0x34); // Low byte
+        assert_eq!(state.read(0xFFFD), 0x12); // High byte
+    }
+
+    // Tests for ADD SP,n
+    #[test]
+    fn test_add_sp_n_positive_offset() {
+        let mut state = State::new();
+        state.sp = 0x1000;
+        state.pc = 0x100;
+        state.write(0x100, 0x10); // Positive offset: +16
+
+        add_sp_n(&mut state);
+
+        assert_eq!(state.sp, 0x1010);
+        assert!(!state.flag_z()); // Always reset
+        assert!(!state.flag_n()); // Always reset
+        assert_eq!(state.pc, 0x101); // PC advanced
+    }
+
+    #[test]
+    fn test_add_sp_n_negative_offset() {
+        let mut state = State::new();
+        state.sp = 0x1000;
+        state.pc = 0x100;
+        state.write(0x100, 0xF0); // Negative offset: -16
+
+        add_sp_n(&mut state);
+
+        assert_eq!(state.sp, 0x0FF0);
+        assert!(!state.flag_z()); // Always reset
+        assert!(!state.flag_n()); // Always reset
+    }
+
+    #[test]
+    fn test_add_sp_n_half_carry() {
+        let mut state = State::new();
+        state.sp = 0x000F;
+        state.pc = 0x100;
+        state.write(0x100, 0x01); // +1
+
+        add_sp_n(&mut state);
+
+        assert_eq!(state.sp, 0x0010);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry from bit 3
+    }
+
+    #[test]
+    fn test_add_sp_n_carry() {
+        let mut state = State::new();
+        state.sp = 0x00FF;
+        state.pc = 0x100;
+        state.write(0x100, 0x01); // +1
+
+        add_sp_n(&mut state);
+
+        assert_eq!(state.sp, 0x0100);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_c()); // Carry from bit 7
+    }
+
+    // Tests for JP HL
+    #[test]
+    fn test_jp_hl_jumps_to_hl() {
+        let mut state = State::new();
+        state.pc = 0x100;
+        state.set_hl(0x8000);
+
+        jp_hl(&mut state);
+
+        assert_eq!(state.pc, 0x8000);
+    }
+
+    #[test]
+    fn test_jp_hl_different_values() {
+        let mut state = State::new();
+        state.set_hl(0x1234);
+
+        jp_hl(&mut state);
+
+        assert_eq!(state.pc, 0x1234);
+    }
+
+    // Tests for LD (nn),A
+    #[test]
+    fn test_ld_nn_a() {
+        let mut state = State::new();
+        state.pc = 0x100;
+        state.a = 0x42;
+
+        // Write address 0x8000 at PC (little-endian)
+        state.write(0x100, 0x00); // Low byte
+        state.write(0x101, 0x80); // High byte
+
+        ld_nn_a(&mut state);
+
+        // Verify A was written to 0x8000
+        assert_eq!(state.read(0x8000), 0x42);
+        assert_eq!(state.pc, 0x102); // PC advanced by 2
+    }
+
+    #[test]
+    fn test_ld_nn_a_different_address() {
+        let mut state = State::new();
+        state.pc = 0x200;
+        state.a = 0xFF;
+
+        state.write(0x200, 0x34); // Low byte
+        state.write(0x201, 0x12); // High byte
+
+        ld_nn_a(&mut state);
+
+        assert_eq!(state.read(0x1234), 0xFF);
+        assert_eq!(state.pc, 0x202);
+    }
+
+    // Tests for LDH A,(n) and LDH A,(C)
+    #[test]
+    fn test_ldh_a_n() {
+        let mut state = State::new();
+        state.pc = 0x100;
+        state.a = 0x00;
+
+        // Write offset 0x80 at PC
+        state.write(0x100, 0x80);
+        // Write test value at 0xFF80
+        state.write(0xFF80, 0x42);
+
+        ldh_a_n(&mut state);
+
+        // Verify A was loaded from 0xFF80
+        assert_eq!(state.a, 0x42);
+        assert_eq!(state.pc, 0x101); // PC advanced by 1
+    }
+
+    #[test]
+    fn test_ldh_a_c() {
+        let mut state = State::new();
+        state.a = 0x00;
+        state.c = 0x44;
+
+        // Write test value at 0xFF44
+        state.write(0xFF44, 0x99);
+
+        ldh_a_c(&mut state);
+
+        // Verify A was loaded from 0xFF44
+        assert_eq!(state.a, 0x99);
+    }
+
+    // Tests for POP AF
+    #[test]
+    fn test_pop_af_basic() {
+        let mut state = State::new();
+        state.sp = 0xFFF0;
+        state.a = 0x00;
+        state.f = 0x00;
+
+        // Setup stack with value 0x12F0 (A=0x12, F=0xF0)
+        state.write(0xFFF0, 0xF0); // Low byte (F)
+        state.write(0xFFF1, 0x12); // High byte (A)
+
+        pop_af(&mut state);
+
+        assert_eq!(state.f, 0xF0);
+        assert_eq!(state.a, 0x12);
+        assert_eq!(state.sp, 0xFFF2); // SP incremented by 2
+    }
+
+    #[test]
+    fn test_pop_af_restores_flags() {
+        let mut state = State::new();
+        state.sp = 0x2000;
+
+        // Setup stack with flags: Z=1, N=1, H=1, C=1 (0xF0)
+        state.write(0x2000, 0xF0); // F register
+        state.write(0x2001, 0x42); // A register
+
+        pop_af(&mut state);
+
+        assert_eq!(state.a, 0x42);
+        assert_eq!(state.f, 0xF0);
+        assert!(state.flag_z());
+        assert!(state.flag_n());
+        assert!(state.flag_h());
+        assert!(state.flag_c());
     }
 }
