@@ -238,6 +238,13 @@ pub fn pop_bc(state: &mut State) {
     state.b = (value >> 8) as u8; // High byte
 }
 
+/// Pop 16-bit value from stack into DE register pair
+pub fn pop_de(state: &mut State) {
+    let value = pop_16bit(state);
+    state.e = value as u8; // Low byte
+    state.d = (value >> 8) as u8; // High byte
+}
+
 /// Jump to absolute 16-bit address
 pub fn jp(state: &mut State) {
     // Read 16-bit address (little-endian)
@@ -1887,6 +1894,11 @@ pub fn execute(state: &mut State) {
             // Conditional return: 8 cycles if not taken, 20 cycles if taken
             state.cycles += if !state.flag_c() { 20 } else { 8 };
         }
+        0xD1 => {
+            /* POP DE */
+            pop_de(state);
+            state.cycles += 12;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -2688,6 +2700,25 @@ mod tests {
 
         assert_eq!(state.c, 0x11);
         assert_eq!(state.b, 0x22);
+    }
+
+    // Tests for POP DE
+    #[test]
+    fn test_pop_de_basic() {
+        let mut state = State::new();
+        state.sp = 0xFFF0;
+        state.d = 0x00;
+        state.e = 0x00;
+
+        // Setup stack with value 0x5678
+        state.write(0xFFF0, 0x78); // Low byte (E)
+        state.write(0xFFF1, 0x56); // High byte (D)
+
+        pop_de(&mut state);
+
+        assert_eq!(state.e, 0x78);
+        assert_eq!(state.d, 0x56);
+        assert_eq!(state.sp, 0xFFF2); // SP incremented by 2
     }
 
     // Tests for JP (absolute jump)
