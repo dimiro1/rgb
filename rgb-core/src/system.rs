@@ -276,6 +276,66 @@ impl State {
     }
 }
 
+/// Update timers based on cycles executed
+///
+/// Game Boy timers:
+/// - DIV (0xFF04): Divider register, increments at 16384 Hz (every 256 cycles)
+/// - TIMA (0xFF05): Timer counter, increments at frequency set by TAC
+/// - TMA (0xFF06): Timer modulo, loaded into TIMA when it overflows
+/// - TAC (0xFF07): Timer control (bit 2 = enable, bits 0-1 = clock select)
+pub fn update_timers(state: &mut State, cycles: u32) {
+    use crate::io::{DIV, IF, TAC, TIMA, TMA};
+
+    // Update DIV register (increments every 256 cycles = 16384 Hz)
+    // DIV is incremented by internal counter, we track using a simplified approach
+    let div_increments = cycles / 256;
+    if div_increments > 0 {
+        let current_div = state.read(DIV);
+        state.write(DIV, current_div.wrapping_add(div_increments as u8));
+    }
+
+    // Check if timer is enabled (bit 2 of TAC)
+    let tac = state.read(TAC);
+    let timer_enabled = (tac & 0x04) != 0;
+
+    if timer_enabled {
+        // Clock select (bits 0-1 of TAC):
+        // 00: 4096 Hz   (1024 cycles per increment)
+        // 01: 262144 Hz (16 cycles per increment)
+        // 10: 65536 Hz  (64 cycles per increment)
+        // 11: 16384 Hz  (256 cycles per increment)
+        let clock_select = tac & 0x03;
+        let cycles_per_increment = match clock_select {
+            0 => 1024,
+            1 => 16,
+            2 => 64,
+            3 => 256,
+            _ => unreachable!(),
+        };
+
+        let tima_increments = cycles / cycles_per_increment;
+        if tima_increments > 0 {
+            let mut tima = state.read(TIMA);
+
+            for _ in 0..tima_increments {
+                tima = tima.wrapping_add(1);
+
+                // Check for overflow (wraparound from 0xFF to 0x00)
+                if tima == 0 {
+                    // Reload from TMA
+                    tima = state.read(TMA);
+
+                    // Request timer interrupt (bit 2 of IF)
+                    let if_flags = state.read(IF);
+                    state.write(IF, if_flags | 0x04);
+                }
+            }
+
+            state.write(TIMA, tima);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -385,5 +445,83 @@ mod tests {
 
         state.write_word(0x5000, 0xFFFF);
         assert_eq!(state.read_word(0x5000), 0xFFFF);
+    }
+
+    #[test]
+    fn test_update_timers_div() {
+        use crate::io::DIV;
+        let mut state = State::new();
+
+        state.write(DIV, 0x00);
+
+        // Run 256 cycles - should increment DIV by 1
+        update_timers(&mut state, 256);
+        assert_eq!(state.read(DIV), 0x01);
+
+        // Run 512 more cycles - should increment DIV by 2
+        update_timers(&mut state, 512);
+        assert_eq!(state.read(DIV), 0x03);
+    }
+
+    #[test]
+    fn test_update_timers_tima_disabled() {
+        use crate::io::{TAC, TIMA};
+        let mut state = State::new();
+
+        state.write(TIMA, 0x00);
+        state.write(TAC, 0x00); // Timer disabled
+
+        // Run cycles - TIMA should not change when disabled
+        update_timers(&mut state, 1024);
+        assert_eq!(state.read(TIMA), 0x00);
+    }
+
+    #[test]
+    fn test_update_timers_tima_enabled() {
+        use crate::io::{TAC, TIMA, TMA};
+        let mut state = State::new();
+
+        state.write(TIMA, 0x00);
+        state.write(TMA, 0x00);
+        state.write(TAC, 0x04); // Timer enabled, 4096 Hz (1024 cycles per increment)
+
+        // Run 1024 cycles - should increment TIMA by 1
+        update_timers(&mut state, 1024);
+        assert_eq!(state.read(TIMA), 0x01);
+
+        // Run 2048 more cycles - should increment TIMA by 2
+        update_timers(&mut state, 2048);
+        assert_eq!(state.read(TIMA), 0x03);
+    }
+
+    #[test]
+    fn test_update_timers_overflow() {
+        use crate::io::{IF, TAC, TIMA, TMA};
+        let mut state = State::new();
+
+        state.write(TIMA, 0xFF);
+        state.write(TMA, 0x10);
+        state.write(TAC, 0x04); // Timer enabled, 4096 Hz
+        state.write(IF, 0x00);
+
+        // Run 1024 cycles - should overflow and reload from TMA
+        update_timers(&mut state, 1024);
+        assert_eq!(state.read(TIMA), 0x10); // Reloaded from TMA
+
+        // Check timer interrupt flag is set (bit 2)
+        assert_eq!(state.read(IF) & 0x04, 0x04);
+    }
+
+    #[test]
+    fn test_update_timers_fast_clock() {
+        use crate::io::{TAC, TIMA};
+        let mut state = State::new();
+
+        state.write(TIMA, 0x00);
+        state.write(TAC, 0x05); // Timer enabled, 262144 Hz (16 cycles per increment)
+
+        // Run 64 cycles - should increment TIMA by 4
+        update_timers(&mut state, 64);
+        assert_eq!(state.read(TIMA), 0x04);
     }
 }

@@ -1,5 +1,5 @@
 use crate::io::{IE, IF};
-use crate::system::State;
+use crate::system::{State, update_timers};
 
 // Opcode constants for special instructions
 const OPCODE_DI: u8 = 0xF3; // Disable interrupts
@@ -1457,6 +1457,9 @@ pub fn execute(state: &mut State) {
         // CPU is still halted, don't execute instruction
         return;
     }
+
+    // Track cycles before instruction execution
+    let cycles_before = state.cycles;
 
     // TODO: This is not fully correct, in fact the read function must take into consideration the
     // current emomory bank and other detalis.
@@ -3175,6 +3178,10 @@ pub fn execute(state: &mut State) {
             state.cycles += 16;
         }
     }
+
+    // Update timers based on cycles consumed by this instruction
+    let cycles_consumed = state.cycles - cycles_before;
+    update_timers(state, cycles_consumed);
 }
 
 #[cfg(test)]
