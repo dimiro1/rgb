@@ -61,9 +61,8 @@ fn reset_memory(state: &mut State) {
     state.write(IE, 0x00);
 }
 
-impl State {
-    /// Initializes the CPU registers to their default power-on values.
-    pub fn new() -> Self {
+impl Default for State {
+    fn default() -> Self {
         let mut state = State {
             a: 0,
             f: 0,
@@ -80,6 +79,13 @@ impl State {
         reset_cpu(&mut state);
         reset_memory(&mut state);
         state
+    }
+}
+
+impl State {
+    /// Initializes the CPU registers to their default power-on values.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Getter and setter for the AF register pair.

@@ -1,4 +1,4 @@
-/// Memory-mapped I/O register addresses
+//! Memory-mapped I/O register addresses
 
 // I/O Registers
 pub const P1: u16 = 0xFF00; // Joypad

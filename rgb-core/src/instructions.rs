@@ -80,9 +80,9 @@ mod tests {
         inc_a(&mut state);
 
         assert_eq!(state.a, 0x43);
-        assert_eq!(state.flag_z(), false);
-        assert_eq!(state.flag_n(), false);
-        assert_eq!(state.flag_h(), false);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
     }
 
     #[test]
@@ -93,9 +93,9 @@ mod tests {
         inc_b(&mut state);
 
         assert_eq!(state.b, 0x00);
-        assert_eq!(state.flag_z(), true); // Result is zero
-        assert_eq!(state.flag_n(), false);
-        assert_eq!(state.flag_h(), true); // Half carry from 0xF to 0x0
+        assert!(state.flag_z()); // Result is zero
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry from 0xF to 0x0
     }
 
     #[test]
@@ -106,9 +106,9 @@ mod tests {
         inc_c(&mut state);
 
         assert_eq!(state.c, 0x10);
-        assert_eq!(state.flag_z(), false);
-        assert_eq!(state.flag_n(), false);
-        assert_eq!(state.flag_h(), true); // Half carry from bit 3 to bit 4
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry from bit 3 to bit 4
     }
 
     #[test]
