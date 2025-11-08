@@ -244,6 +244,13 @@ fn ret_nz(state: &mut State) {
     }
 }
 
+/// Return from subroutine if Z flag is set (Z)
+fn ret_z(state: &mut State) {
+    if state.flag_z() {
+        ret(state);
+    }
+}
+
 /// Return from subroutine if C flag is clear (NC)
 fn ret_nc(state: &mut State) {
     if !state.flag_c() {
@@ -284,6 +291,12 @@ fn push_de(state: &mut State) {
     push_word(value, state);
 }
 
+/// Push BC register pair onto stack
+fn push_bc(state: &mut State) {
+    let value = ((state.b as u16) << 8) | (state.c as u16);
+    push_word(value, state);
+}
+
 /// Jump to absolute 16-bit address
 fn jp(state: &mut State) {
     let address = read_immediate_word(state);
@@ -294,6 +307,14 @@ fn jp(state: &mut State) {
 fn jp_nz(state: &mut State) {
     let address = read_immediate_word(state);
     if !state.flag_z() {
+        state.pc = address;
+    }
+}
+
+/// Jump to absolute address if Z flag is set (Z)
+fn jp_z(state: &mut State) {
+    let address = read_immediate_word(state);
+    if state.flag_z() {
         state.pc = address;
     }
 }
@@ -343,6 +364,16 @@ fn call_nz(state: &mut State) {
     }
 }
 
+/// Call subroutine if Z flag is set (Z)
+fn call_z(state: &mut State) {
+    if state.flag_z() {
+        call(state);
+    } else {
+        // Skip the 2-byte address
+        state.pc += 2;
+    }
+}
+
 /// Call subroutine if C flag is clear (NC)
 fn call_nc(state: &mut State) {
     if !state.flag_c() {
@@ -361,6 +392,12 @@ fn call_c(state: &mut State) {
         // Skip the 2-byte address
         state.pc += 2;
     }
+}
+
+/// RST 00h - Push PC and jump to address 0x0000
+fn rst_00(state: &mut State) {
+    push_word(state.pc, state);
+    state.pc = 0x0000;
 }
 
 /// RST 08h - Push PC and jump to address 0x0008
@@ -429,6 +466,18 @@ fn rst_28(state: &mut State) {
     state.pc = 0x0028;
 }
 
+/// RST 30h - Push PC and jump to address 0x0030
+fn rst_30(state: &mut State) {
+    push_word(state.pc, state);
+    state.pc = 0x0030;
+}
+
+/// RST 38h - Push PC and jump to address 0x0038
+fn rst_38(state: &mut State) {
+    push_word(state.pc, state);
+    state.pc = 0x0038;
+}
+
 /// ADD SP,n - Add signed immediate byte to SP
 /// Z: Reset
 /// N: Reset
@@ -472,11 +521,42 @@ fn ldh_a_c(state: &mut State) {
     state.a = state.read(address);
 }
 
+/// LD HL,SP+n - Load SP plus signed immediate into HL
+/// Z: Reset
+/// N: Reset
+/// H: Set if carry from bit 3
+/// C: Set if carry from bit 7
+fn ld_hl_sp_n(state: &mut State) {
+    let offset = read_immediate_byte(state) as i8;
+    let sp = state.sp;
+    let result = sp.wrapping_add(offset as u16);
+
+    // Flags are based on the lower byte addition
+    state.set_flag_z(false);
+    state.set_flag_n(false);
+    state.set_flag_h((sp & 0xF) + ((offset as u16) & 0xF) > 0xF);
+    state.set_flag_c((sp & 0xFF) + ((offset as u16) & 0xFF) > 0xFF);
+
+    state.set_hl(result);
+}
+
+/// LD A,(nn) - Load from absolute address into A
+fn ld_a_nn(state: &mut State) {
+    let address = read_immediate_word(state);
+    state.a = state.read(address);
+}
+
 /// Pop 16-bit value from stack into AF register pair
 fn pop_af(state: &mut State) {
     let value = pop_word(state);
     state.f = value as u8; // Low byte (flags)
     state.a = (value >> 8) as u8; // High byte
+}
+
+/// Push AF register pair onto stack
+fn push_af(state: &mut State) {
+    let value = ((state.a as u16) << 8) | (state.f as u16);
+    push_word(value, state);
 }
 
 /// HALT instruction - Enter low-power mode or trigger HALT bug
@@ -707,6 +787,14 @@ fn rlc_h(state: &mut State) {
 /// Rotate register L left circular
 fn rlc_l(state: &mut State) {
     state.l = rlc_byte(state.l, state);
+}
+
+/// Rotate value at (HL) left circular
+fn rlc_hl_indirect(state: &mut State) {
+    let addr = state.hl();
+    let value = state.read(addr);
+    let result = rlc_byte(value, state);
+    state.write(addr, result);
 }
 
 /// RLCA - Rotate A left circular (always resets Z flag)
@@ -2101,6 +2189,94 @@ pub fn execute(state: &mut State) {
             // Conditional call: 12 cycles if not taken, 24 cycles if taken
             state.cycles += if !state.flag_z() { 24 } else { 12 };
         }
+        0xC5 => {
+            /* PUSH BC */
+            push_bc(state);
+            state.cycles += 16;
+        }
+        0xC6 => {
+            /* ADD A,n */
+            let value = read_immediate_byte(state);
+            add_a(value, state);
+            state.cycles += 8;
+        }
+        0xC7 => {
+            /* RST 00H */
+            rst_00(state);
+            state.cycles += 16;
+        }
+        0xC8 => {
+            /* RET Z */
+            ret_z(state);
+            // Conditional return: 8 cycles if not taken, 20 cycles if taken
+            state.cycles += if state.flag_z() { 20 } else { 8 };
+        }
+        0xC9 => {
+            /* RET */
+            ret(state);
+            state.cycles += 16;
+        }
+        0xCA => {
+            /* JP Z */
+            jp_z(state);
+            // Conditional jump: 12 cycles if not taken, 16 cycles if taken
+            state.cycles += if state.flag_z() { 16 } else { 12 };
+        }
+        0xCB => {
+            /* CB prefix - Extended instruction set */
+            let cb_op = read_immediate_byte(state);
+            match cb_op {
+                0x00 => {
+                    /* RLC B */
+                    rlc_b(state);
+                    state.cycles += 8;
+                }
+                0x01 => {
+                    /* RLC C */
+                    rlc_c(state);
+                    state.cycles += 8;
+                }
+                0x02 => {
+                    /* RLC D */
+                    rlc_d(state);
+                    state.cycles += 8;
+                }
+                0x03 => {
+                    /* RLC E */
+                    rlc_e(state);
+                    state.cycles += 8;
+                }
+                0x04 => {
+                    /* RLC H */
+                    rlc_h(state);
+                    state.cycles += 8;
+                }
+                0x05 => {
+                    /* RLC L */
+                    rlc_l(state);
+                    state.cycles += 8;
+                }
+                0x06 => {
+                    /* RLC (HL) */
+                    rlc_hl_indirect(state);
+                    state.cycles += 16;
+                }
+                0x07 => {
+                    /* RLC A */
+                    rlc_a(state);
+                    state.cycles += 8;
+                }
+                _ => {
+                    panic!("Unimplemented CB opcode: 0x{:02X}", cb_op);
+                }
+            }
+        }
+        0xCC => {
+            /* CALL Z */
+            call_z(state);
+            // Conditional call: 12 cycles if not taken, 24 cycles if taken
+            state.cycles += if state.flag_z() { 24 } else { 12 };
+        }
         0xCD => {
             /* CALL */
             call(state);
@@ -2299,8 +2475,64 @@ pub fn execute(state: &mut State) {
             state.di_delay = true;
             state.cycles += 4;
         }
-        _ => {
-            panic!("Unimplemented opcode: 0x{:02X}", op);
+        0xF4 => {
+            /* Illegal opcode */
+            illegal_opcode(0xF4, state);
+        }
+        0xF5 => {
+            /* PUSH AF */
+            push_af(state);
+            state.cycles += 16;
+        }
+        0xF6 => {
+            /* OR n */
+            let value = read_immediate_byte(state);
+            or_a(value, state);
+            state.cycles += 8;
+        }
+        0xF7 => {
+            /* RST 30h */
+            rst_30(state);
+            state.cycles += 16;
+        }
+        0xF8 => {
+            /* LD HL,SP+n */
+            ld_hl_sp_n(state);
+            state.cycles += 12;
+        }
+        0xF9 => {
+            /* LD SP,HL */
+            state.sp = state.hl();
+            state.cycles += 8;
+        }
+        0xFA => {
+            /* LD A,(nn) */
+            ld_a_nn(state);
+            state.cycles += 16;
+        }
+        0xFB => {
+            /* EI */
+            state.ei_delay = true;
+            state.cycles += 4;
+        }
+        0xFC => {
+            /* Illegal opcode */
+            illegal_opcode(0xFC, state);
+        }
+        0xFD => {
+            /* Illegal opcode */
+            illegal_opcode(0xFD, state);
+        }
+        0xFE => {
+            /* CP n */
+            let value = read_immediate_byte(state);
+            cp_a(value, state);
+            state.cycles += 8;
+        }
+        0xFF => {
+            /* RST 38h */
+            rst_38(state);
+            state.cycles += 16;
         }
     }
 }
@@ -3003,6 +3235,40 @@ mod tests {
     }
 
     #[test]
+    fn test_ret_z_returns_when_z_set() {
+        let mut state = State::new();
+        state.sp = 0xFFF0;
+        state.pc = 0x1234;
+        state.set_flag_z(true);
+
+        // Setup stack with return address 0x5678
+        state.write(0xFFF0, 0x78); // Low byte
+        state.write(0xFFF1, 0x56); // High byte
+
+        ret_z(&mut state);
+
+        assert_eq!(state.pc, 0x5678); // PC set to return address
+        assert_eq!(state.sp, 0xFFF2); // SP incremented by 2
+    }
+
+    #[test]
+    fn test_ret_z_no_return_when_z_clear() {
+        let mut state = State::new();
+        state.sp = 0xFFF0;
+        state.pc = 0x1234;
+        state.set_flag_z(false);
+
+        // Setup stack with return address 0x5678
+        state.write(0xFFF0, 0x78); // Low byte
+        state.write(0xFFF1, 0x56); // High byte
+
+        ret_z(&mut state);
+
+        assert_eq!(state.pc, 0x1234); // PC unchanged
+        assert_eq!(state.sp, 0xFFF0); // SP unchanged
+    }
+
+    #[test]
     fn test_ret_pops_correct_address() {
         let mut state = State::new();
         state.sp = 0x1000;
@@ -3232,6 +3498,35 @@ mod tests {
     }
 
     #[test]
+    fn test_jp_z_jumps_when_z_set() {
+        let mut state = State::new();
+        state.pc = 0x200;
+        state.set_flag_z(true);
+
+        state.write(0x200, 0x34); // Low byte
+        state.write(0x201, 0x12); // High byte
+
+        jp_z(&mut state);
+
+        assert_eq!(state.pc, 0x1234);
+    }
+
+    #[test]
+    fn test_jp_z_no_jump_when_z_clear() {
+        let mut state = State::new();
+        state.pc = 0x200;
+        state.set_flag_z(false);
+
+        state.write(0x200, 0x34); // Low byte
+        state.write(0x201, 0x12); // High byte
+
+        jp_z(&mut state);
+
+        // PC should be incremented by 2 (past the address bytes) but not jump
+        assert_eq!(state.pc, 0x202);
+    }
+
+    #[test]
     fn test_jp_nc_jumps_when_c_clear() {
         let mut state = State::new();
         state.pc = 0x200;
@@ -3348,6 +3643,42 @@ mod tests {
     }
 
     #[test]
+    fn test_call_z_calls_when_z_set() {
+        let mut state = State::new();
+        state.pc = 0x300;
+        state.sp = 0xFF00;
+        state.set_flag_z(true);
+
+        state.write(0x300, 0x78); // Low byte
+        state.write(0x301, 0x56); // High byte
+
+        call_z(&mut state);
+
+        // Should have called (jumped and pushed return address)
+        assert_eq!(state.pc, 0x5678);
+        assert_eq!(state.sp, 0xFEFE);
+        assert_eq!(state.read(0xFEFE), 0x02); // Low byte of 0x302
+        assert_eq!(state.read(0xFEFF), 0x03); // High byte of 0x302
+    }
+
+    #[test]
+    fn test_call_z_no_call_when_z_clear() {
+        let mut state = State::new();
+        state.pc = 0x300;
+        state.sp = 0xFF00;
+        state.set_flag_z(false);
+
+        state.write(0x300, 0x78); // Low byte
+        state.write(0x301, 0x56); // High byte
+
+        call_z(&mut state);
+
+        // Should not have called (PC advanced, SP unchanged)
+        assert_eq!(state.pc, 0x302);
+        assert_eq!(state.sp, 0xFF00);
+    }
+
+    #[test]
     fn test_call_nc_calls_when_c_clear() {
         let mut state = State::new();
         state.pc = 0x300;
@@ -3436,6 +3767,23 @@ mod tests {
 
     // Tests for RST
     #[test]
+    fn test_rst_00_pushes_pc_and_jumps() {
+        let mut state = State::new();
+        state.pc = 0xABCD;
+        state.sp = 0xFFFE;
+
+        rst_00(&mut state);
+
+        // PC should be at RST vector 0x0000
+        assert_eq!(state.pc, 0x0000);
+
+        // Return address (0xABCD) should be pushed onto stack
+        assert_eq!(state.sp, 0xFFFC);
+        assert_eq!(state.read(0xFFFC), 0xCD); // Low byte
+        assert_eq!(state.read(0xFFFD), 0xAB); // High byte
+    }
+
+    #[test]
     fn test_rst_08_pushes_pc_and_jumps() {
         let mut state = State::new();
         state.pc = 0x1234;
@@ -3502,6 +3850,23 @@ mod tests {
         // Verify DE was pushed (little-endian)
         assert_eq!(state.read(0x2FFE), 0xCD); // Low byte (E)
         assert_eq!(state.read(0x2FFF), 0xAB); // High byte (D)
+    }
+
+    #[test]
+    fn test_push_bc() {
+        let mut state = State::new();
+        state.sp = 0x3000;
+        state.b = 0x12;
+        state.c = 0x34;
+
+        push_bc(&mut state);
+
+        // SP decremented by 2
+        assert_eq!(state.sp, 0x2FFE);
+
+        // Verify BC was pushed (little-endian)
+        assert_eq!(state.read(0x2FFE), 0x34); // Low byte (C)
+        assert_eq!(state.read(0x2FFF), 0x12); // High byte (B)
     }
 
     // Tests for POP HL and PUSH HL
@@ -5749,5 +6114,152 @@ mod tests {
         handle_delayed_ime(&mut state);
 
         assert!(!state.ime); // IME remains false
+    }
+
+    // Tests for PUSH AF
+    #[test]
+    fn test_push_af() {
+        let mut state = State::new();
+        state.sp = 0x3000;
+        state.a = 0x42;
+        state.f = 0xF0;
+
+        push_af(&mut state);
+
+        // SP decremented by 2
+        assert_eq!(state.sp, 0x2FFE);
+
+        // Verify AF was pushed (little-endian)
+        assert_eq!(state.read(0x2FFE), 0xF0); // Low byte (F)
+        assert_eq!(state.read(0x2FFF), 0x42); // High byte (A)
+    }
+
+    // Tests for RST 30h and RST 38h
+    #[test]
+    fn test_rst_30_pushes_pc_and_jumps() {
+        let mut state = State::new();
+        state.pc = 0x1234;
+        state.sp = 0xFFFE;
+
+        rst_30(&mut state);
+
+        // PC should be at RST vector 0x0030
+        assert_eq!(state.pc, 0x0030);
+
+        // Return address (0x1234) should be pushed onto stack
+        assert_eq!(state.sp, 0xFFFC);
+        assert_eq!(state.read(0xFFFC), 0x34); // Low byte
+        assert_eq!(state.read(0xFFFD), 0x12); // High byte
+    }
+
+    #[test]
+    fn test_rst_38_pushes_pc_and_jumps() {
+        let mut state = State::new();
+        state.pc = 0xABCD;
+        state.sp = 0xFFFE;
+
+        rst_38(&mut state);
+
+        // PC should be at RST vector 0x0038
+        assert_eq!(state.pc, 0x0038);
+
+        // Return address (0xABCD) should be pushed onto stack
+        assert_eq!(state.sp, 0xFFFC);
+        assert_eq!(state.read(0xFFFC), 0xCD); // Low byte
+        assert_eq!(state.read(0xFFFD), 0xAB); // High byte
+    }
+
+    // Tests for LD HL,SP+n
+    #[test]
+    fn test_ld_hl_sp_n_positive_offset() {
+        let mut state = State::new();
+        state.sp = 0x1000;
+        state.pc = 0x100;
+        state.write(0x100, 0x10); // Positive offset: +16
+
+        ld_hl_sp_n(&mut state);
+
+        assert_eq!(state.hl(), 0x1010);
+        assert!(!state.flag_z()); // Always reset
+        assert!(!state.flag_n()); // Always reset
+        assert_eq!(state.pc, 0x101); // PC advanced
+    }
+
+    #[test]
+    fn test_ld_hl_sp_n_negative_offset() {
+        let mut state = State::new();
+        state.sp = 0x1000;
+        state.pc = 0x100;
+        state.write(0x100, 0xF0); // Negative offset: -16
+
+        ld_hl_sp_n(&mut state);
+
+        assert_eq!(state.hl(), 0x0FF0);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+    }
+
+    #[test]
+    fn test_ld_hl_sp_n_half_carry() {
+        let mut state = State::new();
+        state.sp = 0x000F;
+        state.pc = 0x100;
+        state.write(0x100, 0x01); // +1
+
+        ld_hl_sp_n(&mut state);
+
+        assert_eq!(state.hl(), 0x0010);
+        assert!(state.flag_h()); // Half carry from bit 3
+    }
+
+    #[test]
+    fn test_ld_hl_sp_n_carry() {
+        let mut state = State::new();
+        state.sp = 0x00FF;
+        state.pc = 0x100;
+        state.write(0x100, 0x01); // +1
+
+        ld_hl_sp_n(&mut state);
+
+        assert_eq!(state.hl(), 0x0100);
+        assert!(state.flag_c()); // Carry from bit 7
+    }
+
+    // Tests for LD A,(nn)
+    #[test]
+    fn test_ld_a_nn() {
+        let mut state = State::new();
+        state.pc = 0x100;
+        state.a = 0x00;
+
+        // Write address 0x8000 at PC (little-endian)
+        state.write(0x100, 0x00); // Low byte
+        state.write(0x101, 0x80); // High byte
+
+        // Write test value at 0x8000
+        state.write(0x8000, 0x42);
+
+        ld_a_nn(&mut state);
+
+        // Verify A was loaded from 0x8000
+        assert_eq!(state.a, 0x42);
+        assert_eq!(state.pc, 0x102); // PC advanced by 2
+    }
+
+    #[test]
+    fn test_ld_a_nn_different_address() {
+        let mut state = State::new();
+        state.pc = 0x200;
+        state.a = 0x00;
+
+        state.write(0x200, 0x34); // Low byte
+        state.write(0x201, 0x12); // High byte
+
+        state.write(0x1234, 0xFF);
+
+        ld_a_nn(&mut state);
+
+        assert_eq!(state.a, 0xFF);
+        assert_eq!(state.pc, 0x202);
     }
 }
