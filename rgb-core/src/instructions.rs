@@ -68,6 +68,36 @@ pub fn inc_sp(state: &mut State) {
     state.set_sp(value);
 }
 
+/// Execute a single CPU instruction.
+pub fn execute(state: &mut State) {
+    // TODO: handle interrupts
+
+    // TODO: This is not fully correct, in fact the read function must take into consideration the
+    // current emomory bank and other detalis.
+    let op = state.read(state.pc);
+    state.pc += 1;
+
+    match op {
+        0x00 => { /* NOP */ }
+        0x01 => {
+            /* LD BC,n */
+            state.set_bc(state.read_word(state.pc));
+            state.pc += 2;
+        }
+        0x02 => {
+            /* LD (BC),A */
+            state.write(state.bc(), state.a);
+        }
+        0x03 => {
+            /* INC BC */
+            state.set_bc(state.bc() + 1);
+        }
+        _ => {
+            panic!("Unimplemented opcode: 0x{:02X}", op);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -170,10 +170,25 @@ impl State {
         self.mem[addr as usize]
     }
 
+    #[inline]
+    pub fn read_word(&self, addr: u16) -> u16 {
+        let high = self.read(addr + 1) as u16;
+        let low = self.read(addr) as u16;
+        (high << 8) | low
+    }
+
     /// Writes a byte to memory at the specified address.
     #[inline]
     pub fn write(&mut self, addr: u16, value: u8) {
         self.mem[addr as usize] = value;
+    }
+
+    #[inline]
+    pub fn write_word(&mut self, addr: u16, data: u16) {
+        let high = (data >> 8) as u8;
+        let low = (data & 0xFF) as u8;
+        self.write(addr, low);
+        self.write(addr + 1, high);
     }
 
     // Flag register helpers (F register: Z N H C - - - -)
@@ -301,5 +316,60 @@ mod tests {
 
         state.write(0xFFFF, 0x34);
         assert_eq!(state.read(0xFFFF), 0x34);
+    }
+
+    #[test]
+    fn test_read_word() {
+        let mut state = State::new();
+
+        // Test reading a word (little-endian: low byte first, high byte second)
+        state.write(0x1000, 0x34); // Low byte
+        state.write(0x1001, 0x12); // High byte
+        assert_eq!(state.read_word(0x1000), 0x1234);
+
+        // Test at different address
+        state.write(0x2000, 0xCD);
+        state.write(0x2001, 0xAB);
+        assert_eq!(state.read_word(0x2000), 0xABCD);
+
+        // Test at boundary
+        state.write(0xFFFE, 0xFF);
+        state.write(0xFFFF, 0xFF);
+        assert_eq!(state.read_word(0xFFFE), 0xFFFF);
+    }
+
+    #[test]
+    fn test_write_word() {
+        let mut state = State::new();
+
+        // Test writing a word (little-endian: low byte first, high byte second)
+        state.write_word(0x1000, 0x1234);
+        assert_eq!(state.read(0x1000), 0x34); // Low byte
+        assert_eq!(state.read(0x1001), 0x12); // High byte
+
+        // Test at different address
+        state.write_word(0x2000, 0xABCD);
+        assert_eq!(state.read(0x2000), 0xCD); // Low byte
+        assert_eq!(state.read(0x2001), 0xAB); // High byte
+
+        // Test at boundary
+        state.write_word(0xFFFE, 0xFFFF);
+        assert_eq!(state.read(0xFFFE), 0xFF);
+        assert_eq!(state.read(0xFFFF), 0xFF);
+    }
+
+    #[test]
+    fn test_read_write_word_roundtrip() {
+        let mut state = State::new();
+
+        // Test that write_word and read_word are inverses
+        state.write_word(0x3000, 0x5678);
+        assert_eq!(state.read_word(0x3000), 0x5678);
+
+        state.write_word(0x4000, 0x0000);
+        assert_eq!(state.read_word(0x4000), 0x0000);
+
+        state.write_word(0x5000, 0xFFFF);
+        assert_eq!(state.read_word(0x5000), 0xFFFF);
     }
 }
