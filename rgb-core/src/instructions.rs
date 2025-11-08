@@ -230,6 +230,32 @@ pub fn pop_bc(state: &mut State) {
     state.sp = state.sp.wrapping_add(1);
 }
 
+/// Jump to absolute 16-bit address
+pub fn jp(state: &mut State) {
+    // Read 16-bit address (little-endian)
+    let low = state.read(state.pc);
+    state.pc += 1;
+    let high = state.read(state.pc);
+    state.pc += 1;
+
+    // Set PC to the absolute address
+    state.pc = ((high as u16) << 8) | (low as u16);
+}
+
+/// Jump to absolute address if Z flag is clear (NZ)
+pub fn jp_nz(state: &mut State) {
+    // Read 16-bit address (little-endian)
+    let low = state.read(state.pc);
+    state.pc += 1;
+    let high = state.read(state.pc);
+    state.pc += 1;
+
+    if !state.flag_z() {
+        // Set PC to the absolute address
+        state.pc = ((high as u16) << 8) | (low as u16);
+    }
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1778,6 +1804,17 @@ pub fn execute(state: &mut State) {
             pop_bc(state);
             state.cycles += 12;
         }
+        0xC2 => {
+            /* JP NZ */
+            jp_nz(state);
+            // Conditional jump: 12 cycles if not taken, 16 cycles if taken
+            state.cycles += if !state.flag_z() { 16 } else { 12 };
+        }
+        0xC3 => {
+            /* JP */
+            jp(state);
+            state.cycles += 16;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -2545,6 +2582,64 @@ mod tests {
 
         assert_eq!(state.c, 0x11);
         assert_eq!(state.b, 0x22);
+    }
+
+    // Tests for JP (absolute jump)
+    #[test]
+    fn test_jp_sets_pc_to_address() {
+        let mut state = State::new();
+        state.pc = 0x100;
+
+        // Write jump address 0x8000 at PC (little-endian)
+        state.write(0x100, 0x00); // Low byte
+        state.write(0x101, 0x80); // High byte
+
+        jp(&mut state);
+
+        assert_eq!(state.pc, 0x8000);
+    }
+
+    #[test]
+    fn test_jp_little_endian() {
+        let mut state = State::new();
+        state.pc = 0x200;
+
+        // Write jump address 0x1234 (little-endian)
+        state.write(0x200, 0x34); // Low byte
+        state.write(0x201, 0x12); // High byte
+
+        jp(&mut state);
+
+        assert_eq!(state.pc, 0x1234);
+    }
+
+    #[test]
+    fn test_jp_nz_jumps_when_z_clear() {
+        let mut state = State::new();
+        state.pc = 0x150;
+        state.set_flag_z(false);
+
+        state.write(0x150, 0xCD); // Low byte
+        state.write(0x151, 0xAB); // High byte
+
+        jp_nz(&mut state);
+
+        assert_eq!(state.pc, 0xABCD);
+    }
+
+    #[test]
+    fn test_jp_nz_no_jump_when_z_set() {
+        let mut state = State::new();
+        state.pc = 0x150;
+        state.set_flag_z(true);
+
+        state.write(0x150, 0xCD); // Low byte
+        state.write(0x151, 0xAB); // High byte
+
+        jp_nz(&mut state);
+
+        // PC should be incremented by 2 (past the address bytes) but not jump
+        assert_eq!(state.pc, 0x152);
     }
 
     #[test]
