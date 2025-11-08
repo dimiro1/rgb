@@ -14,9 +14,11 @@ pub struct State {
     pub mem: [u8; 0x10000], // 64KB addressable memory
     pub ime: bool,          // Interrupt Master Enable flag
     pub halt: bool,         // CPU is halted
+    pub halt_bug: bool,     // HALT bug triggered (PC not incremented after HALT)
     pub ei_delay: bool,     // EI takes effect after next instruction
     pub di_delay: bool,     // DI takes effect after next instruction
     pub cycles: u32,        // Total CPU cycles executed
+    pub last_opcode: u8,    // Last executed opcode (for delayed interrupt handling)
 }
 
 fn reset_cpu(state: &mut State) {
@@ -82,9 +84,11 @@ impl Default for State {
             mem: [0; 0x10000],
             ime: false,
             halt: false,
+            halt_bug: false,
             ei_delay: false,
             di_delay: false,
             cycles: 0,
+            last_opcode: 0,
         };
         reset_cpu(&mut state);
         reset_memory(&mut state);

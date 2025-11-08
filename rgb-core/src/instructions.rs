@@ -1,6 +1,10 @@
 use crate::io::{IE, IF};
 use crate::system::State;
 
+// Opcode constants for special instructions
+const OPCODE_DI: u8 = 0xF3; // Disable interrupts
+const OPCODE_EI: u8 = 0xFB; // Enable interrupts
+
 /// Check if there are any pending interrupts that should wake the CPU
 fn has_pending_interrupt(state: &State) -> bool {
     let ie = state.read(IE); // Interrupt Enable
@@ -473,6 +477,100 @@ pub fn pop_af(state: &mut State) {
     let value = pop_word(state);
     state.f = value as u8; // Low byte (flags)
     state.a = (value >> 8) as u8; // High byte
+}
+
+/// HALT instruction - Enter low-power mode or trigger HALT bug
+///
+/// Normal behavior (IME=1 or no pending interrupts):
+///   - CPU enters HALT mode and waits for an interrupt
+///
+/// HALT bug (IME=0 and pending interrupt):
+///   - CPU exits HALT immediately but PC is NOT incremented
+///   - This causes the next instruction byte to be read twice
+pub fn halt(state: &mut State) {
+    // Check for HALT bug: when IME=0 and there's a pending interrupt
+    if !state.ime && has_pending_interrupt(state) {
+        // HALT bug: CPU exits HALT immediately but PC is not incremented
+        // This causes the next instruction byte to be read twice
+        state.halt_bug = true;
+    } else {
+        // Normal HALT: CPU enters low-power mode
+        state.halt = true;
+    }
+}
+
+/// Handle delayed interrupt master enable (IME) changes
+///
+/// EI and DI instructions have a 1-instruction delay before taking effect.
+/// This allows constructs like: EI; RETI to work correctly.
+///
+/// This function checks if the delayed IME change should be applied:
+/// - If last instruction was NOT EI/DI, apply the delayed change
+/// - If last instruction WAS EI/DI, keep the delay for one more instruction
+///
+/// Must be called BEFORE halt check so IME changes are processed even when halted
+pub fn handle_delayed_ime(state: &mut State) {
+    // Handle delayed interrupt disable (DI instruction)
+    if state.di_delay {
+        if state.last_opcode != OPCODE_DI {
+            state.di_delay = false;
+            state.ime = false;
+        }
+    }
+
+    // Handle delayed interrupt enable (EI instruction)
+    if state.ei_delay {
+        if state.last_opcode != OPCODE_EI {
+            state.ei_delay = false;
+            state.ime = true;
+        }
+    }
+}
+
+/// Handle HALT mode processing at the beginning of instruction execution
+///
+/// This function handles both:
+/// 1. HALT bug: Adjusts PC when halt_bug flag is set
+/// 2. HALT exit: Checks if CPU should exit HALT mode due to interrupts
+///
+/// Returns true if instruction execution should continue, false if CPU is halted
+///
+/// HALT bug behavior (halt_bug = true):
+///   - Decrements PC to cause next byte to be read twice
+///   - Clears halt_bug flag
+///   - Continues execution
+///
+/// HALT mode behavior (halt = true):
+///   - If pending interrupt exists: exits HALT, continues execution
+///   - If no pending interrupt: stays halted, returns false
+///
+/// Not halted:
+///   - Returns true to continue normal execution
+pub fn handle_halt(state: &mut State) -> bool {
+    // Handle HALT bug: PC should not increment after HALT when bug is triggered
+    // This causes the next instruction byte to be read twice
+    if state.halt_bug {
+        state.halt_bug = false;
+        state.pc = state.pc.wrapping_sub(1); // Undo the PC increment from HALT instruction
+        return true; // Continue execution (next byte will be read again)
+    }
+
+    // Handle HALT mode exit
+    if state.halt {
+        // Check if there are any pending interrupts
+        if has_pending_interrupt(state) {
+            state.halt = false;
+            // If IME is enabled, the interrupt will be handled by service_interrupts()
+            // If IME is disabled, we just continue execution (HALT exit behavior)
+            return true; // Continue execution
+        } else {
+            // Still halted, don't execute instruction
+            return false; // Skip execution
+        }
+    }
+
+    // Not halted, continue normal execution
+    true
 }
 
 /// Increment a byte value by 1 and update flags accordingly
@@ -990,40 +1088,18 @@ pub fn execute(state: &mut State) {
 
     // Handle delayed interrupt enable/disable (EI and DI take effect after next instruction)
     // This must happen before halt check so IME changes are processed even when halted
-    if state.di_delay {
-        let prev_opcode = state.read(state.pc.wrapping_sub(1));
-        if prev_opcode != 0xF3 {
-            // 0xF3 is DI opcode
-            state.di_delay = false;
-            state.ime = false;
-        }
-    }
+    handle_delayed_ime(state);
 
-    if state.ei_delay {
-        let prev_opcode = state.read(state.pc.wrapping_sub(1));
-        if prev_opcode != 0xFB {
-            // 0xFB is EI opcode
-            state.ei_delay = false;
-            state.ime = true;
-        }
-    }
-
-    // If halted, check for interrupts to wake up
-    if state.halt {
-        // Check if there are any pending interrupts
-        if has_pending_interrupt(state) {
-            state.halt = false;
-            // If IME is enabled, the interrupt will be handled by interrupt logic
-            // If IME is disabled, we just continue execution (HALT bug behavior)
-        } else {
-            // Still halted, don't execute instruction
-            return;
-        }
+    // Handle HALT mode and HALT bug
+    if !handle_halt(state) {
+        // CPU is still halted, don't execute instruction
+        return;
     }
 
     // TODO: This is not fully correct, in fact the read function must take into consideration the
     // current emomory bank and other detalis.
     let op = read_immediate_byte(state);
+    state.last_opcode = op; // Store for delayed interrupt handling
 
     match op {
         0x00 => {
@@ -1621,9 +1697,7 @@ pub fn execute(state: &mut State) {
         }
         0x76 => {
             /* HALT */
-            if state.ime {
-                state.halt = true;
-            }
+            halt(state);
             state.cycles += 4;
         }
         0x77 => {
@@ -5294,5 +5368,386 @@ mod tests {
         assert!(state.flag_n());
         assert!(state.flag_h());
         assert!(state.flag_c());
+    }
+
+    // Tests for HALT instruction
+    #[test]
+    fn test_halt_normal_with_ime_enabled() {
+        let mut state = State::new();
+        state.ime = true;
+        state.halt = false;
+        state.halt_bug = false;
+
+        halt(&mut state);
+
+        assert!(state.halt); // CPU enters HALT mode
+        assert!(!state.halt_bug); // No HALT bug
+    }
+
+    #[test]
+    fn test_halt_normal_with_ime_disabled_no_interrupt() {
+        let mut state = State::new();
+        state.ime = false;
+        state.halt = false;
+        state.halt_bug = false;
+        // No pending interrupts (IE and IF are 0)
+
+        halt(&mut state);
+
+        assert!(state.halt); // CPU enters HALT mode
+        assert!(!state.halt_bug); // No HALT bug
+    }
+
+    #[test]
+    fn test_halt_bug_triggered() {
+        use crate::io::{IE, IF};
+
+        let mut state = State::new();
+        state.ime = false; // Interrupts disabled
+        state.halt = false;
+        state.halt_bug = false;
+
+        // Set up a pending interrupt (e.g., V-Blank)
+        state.write(IE, 0x01); // Enable V-Blank interrupt
+        state.write(IF, 0x01); // V-Blank interrupt pending
+
+        halt(&mut state);
+
+        assert!(!state.halt); // CPU does NOT enter HALT mode
+        assert!(state.halt_bug); // HALT bug is triggered
+    }
+
+    #[test]
+    fn test_halt_bug_with_multiple_pending_interrupts() {
+        use crate::io::{IE, IF};
+
+        let mut state = State::new();
+        state.ime = false;
+        state.halt = false;
+        state.halt_bug = false;
+
+        // Multiple pending interrupts
+        state.write(IE, 0x1F); // Enable all interrupts
+        state.write(IF, 0x0F); // Multiple interrupts pending
+
+        halt(&mut state);
+
+        assert!(!state.halt);
+        assert!(state.halt_bug);
+    }
+
+    #[test]
+    fn test_halt_no_bug_when_ime_enabled_with_pending_interrupt() {
+        use crate::io::{IE, IF};
+
+        let mut state = State::new();
+        state.ime = true; // Interrupts enabled
+        state.halt = false;
+        state.halt_bug = false;
+
+        // Pending interrupt
+        state.write(IE, 0x01);
+        state.write(IF, 0x01);
+
+        halt(&mut state);
+
+        assert!(state.halt); // Normal HALT behavior
+        assert!(!state.halt_bug); // No bug when IME is enabled
+    }
+
+    #[test]
+    fn test_halt_no_bug_when_interrupt_not_enabled() {
+        use crate::io::{IE, IF};
+
+        let mut state = State::new();
+        state.ime = false;
+        state.halt = false;
+        state.halt_bug = false;
+
+        // Interrupt pending but not enabled
+        state.write(IE, 0x00); // No interrupts enabled
+        state.write(IF, 0x01); // Interrupt pending
+
+        halt(&mut state);
+
+        assert!(state.halt); // Normal HALT
+        assert!(!state.halt_bug); // No bug (interrupt not enabled in IE)
+    }
+
+    #[test]
+    fn test_halt_no_bug_when_interrupt_enabled_but_not_pending() {
+        use crate::io::{IE, IF};
+
+        let mut state = State::new();
+        state.ime = false;
+        state.halt = false;
+        state.halt_bug = false;
+
+        // Interrupt enabled but not pending
+        state.write(IE, 0x01); // Interrupt enabled
+        state.write(IF, 0x00); // No interrupt pending
+
+        halt(&mut state);
+
+        assert!(state.halt); // Normal HALT
+        assert!(!state.halt_bug); // No bug (no pending interrupt)
+    }
+
+    // Tests for handle_halt() function
+    #[test]
+    fn test_handle_halt_not_halted() {
+        let mut state = State::new();
+        state.halt = false;
+        state.halt_bug = false;
+
+        let should_continue = handle_halt(&mut state);
+
+        assert!(should_continue); // Should continue execution
+        assert!(!state.halt);
+        assert!(!state.halt_bug);
+    }
+
+    #[test]
+    fn test_handle_halt_bug_triggered() {
+        let mut state = State::new();
+        state.halt = false;
+        state.halt_bug = true;
+        state.pc = 0x100;
+
+        let should_continue = handle_halt(&mut state);
+
+        assert!(should_continue); // Should continue execution
+        assert!(!state.halt_bug); // Flag cleared
+        assert_eq!(state.pc, 0xFF); // PC decremented (100 - 1 = FF)
+    }
+
+    #[test]
+    fn test_handle_halt_bug_with_wrapping() {
+        let mut state = State::new();
+        state.halt = false;
+        state.halt_bug = true;
+        state.pc = 0x0000;
+
+        let should_continue = handle_halt(&mut state);
+
+        assert!(should_continue);
+        assert!(!state.halt_bug);
+        assert_eq!(state.pc, 0xFFFF); // Wrapping: 0000 - 1 = FFFF
+    }
+
+    #[test]
+    fn test_handle_halt_mode_with_interrupt() {
+        use crate::io::{IE, IF};
+
+        let mut state = State::new();
+        state.halt = true;
+        state.halt_bug = false;
+
+        // Set up pending interrupt
+        state.write(IE, 0x01);
+        state.write(IF, 0x01);
+
+        let should_continue = handle_halt(&mut state);
+
+        assert!(should_continue); // Should exit HALT and continue
+        assert!(!state.halt); // HALT mode exited
+        assert!(!state.halt_bug);
+    }
+
+    #[test]
+    fn test_handle_halt_mode_without_interrupt() {
+        let mut state = State::new();
+        state.halt = true;
+        state.halt_bug = false;
+        // No pending interrupts
+
+        let should_continue = handle_halt(&mut state);
+
+        assert!(!should_continue); // Should NOT continue (stay halted)
+        assert!(state.halt); // Still in HALT mode
+        assert!(!state.halt_bug);
+    }
+
+    #[test]
+    fn test_handle_halt_bug_priority_over_halt_mode() {
+        use crate::io::{IE, IF};
+
+        let mut state = State::new();
+        state.halt = true; // Both flags set
+        state.halt_bug = true;
+        state.pc = 0x200;
+
+        // Set up pending interrupt
+        state.write(IE, 0x01);
+        state.write(IF, 0x01);
+
+        let should_continue = handle_halt(&mut state);
+
+        // HALT bug is handled first (checked before halt mode)
+        assert!(should_continue);
+        assert!(!state.halt_bug); // Bug flag cleared
+        assert!(state.halt); // HALT flag NOT touched (bug takes priority)
+        assert_eq!(state.pc, 0x1FF); // PC decremented
+    }
+
+    #[test]
+    fn test_handle_halt_mode_exit_with_ime_enabled() {
+        use crate::io::{IE, IF};
+
+        let mut state = State::new();
+        state.halt = true;
+        state.ime = true; // IME enabled
+
+        // Pending interrupt
+        state.write(IE, 0x01);
+        state.write(IF, 0x01);
+
+        let should_continue = handle_halt(&mut state);
+
+        assert!(should_continue);
+        assert!(!state.halt); // Exited HALT
+        // Interrupt will be serviced by service_interrupts() later
+    }
+
+    #[test]
+    fn test_handle_halt_mode_exit_with_ime_disabled() {
+        use crate::io::{IE, IF};
+
+        let mut state = State::new();
+        state.halt = true;
+        state.ime = false; // IME disabled
+
+        // Pending interrupt
+        state.write(IE, 0x01);
+        state.write(IF, 0x01);
+
+        let should_continue = handle_halt(&mut state);
+
+        assert!(should_continue);
+        assert!(!state.halt); // Exited HALT
+        // Execution continues without servicing interrupt (HALT exit behavior)
+    }
+
+    // Tests for handle_delayed_ime() function
+    #[test]
+    fn test_handle_delayed_ime_no_delay() {
+        let mut state = State::new();
+        state.ime = true;
+        state.ei_delay = false;
+        state.di_delay = false;
+        state.last_opcode = 0x00; // NOP
+
+        handle_delayed_ime(&mut state);
+
+        assert!(state.ime); // IME unchanged
+        assert!(!state.ei_delay);
+        assert!(!state.di_delay);
+    }
+
+    #[test]
+    fn test_handle_delayed_ime_di_applies_after_other_instruction() {
+        let mut state = State::new();
+        state.ime = true;
+        state.di_delay = true;
+        state.last_opcode = 0x00; // Last instruction was NOT DI
+
+        handle_delayed_ime(&mut state);
+
+        assert!(!state.ime); // IME disabled
+        assert!(!state.di_delay); // Delay cleared
+    }
+
+    #[test]
+    fn test_handle_delayed_ime_di_does_not_apply_after_di() {
+        let mut state = State::new();
+        state.ime = true;
+        state.di_delay = true;
+        state.last_opcode = OPCODE_DI; // Last instruction WAS DI
+
+        handle_delayed_ime(&mut state);
+
+        assert!(state.ime); // IME still enabled (delay continues)
+        assert!(state.di_delay); // Delay flag still set
+    }
+
+    #[test]
+    fn test_handle_delayed_ime_ei_applies_after_other_instruction() {
+        let mut state = State::new();
+        state.ime = false;
+        state.ei_delay = true;
+        state.last_opcode = 0x00; // Last instruction was NOT EI
+
+        handle_delayed_ime(&mut state);
+
+        assert!(state.ime); // IME enabled
+        assert!(!state.ei_delay); // Delay cleared
+    }
+
+    #[test]
+    fn test_handle_delayed_ime_ei_does_not_apply_after_ei() {
+        let mut state = State::new();
+        state.ime = false;
+        state.ei_delay = true;
+        state.last_opcode = OPCODE_EI; // Last instruction WAS EI
+
+        handle_delayed_ime(&mut state);
+
+        assert!(!state.ime); // IME still disabled (delay continues)
+        assert!(state.ei_delay); // Delay flag still set
+    }
+
+    #[test]
+    fn test_handle_delayed_ime_both_delays_set() {
+        let mut state = State::new();
+        state.ime = true;
+        state.di_delay = true;
+        state.ei_delay = true; // Both set (unusual but possible in testing)
+        state.last_opcode = 0x00;
+
+        handle_delayed_ime(&mut state);
+
+        // DI is processed first (disables IME), then EI is processed (enables IME)
+        assert!(state.ime); // EI applied last, so IME ends up enabled
+        assert!(!state.di_delay); // DI delay cleared
+        assert!(!state.ei_delay); // EI delay cleared
+    }
+
+    #[test]
+    fn test_handle_delayed_ime_di_after_multiple_instructions() {
+        let mut state = State::new();
+        state.ime = true;
+        state.di_delay = true;
+        state.last_opcode = 0x3E; // LD A,n (random instruction)
+
+        handle_delayed_ime(&mut state);
+
+        assert!(!state.ime);
+        assert!(!state.di_delay);
+    }
+
+    #[test]
+    fn test_handle_delayed_ime_ei_after_reti() {
+        let mut state = State::new();
+        state.ime = false;
+        state.ei_delay = true;
+        state.last_opcode = 0xD9; // RETI (common pattern: EI; RETI)
+
+        handle_delayed_ime(&mut state);
+
+        assert!(state.ime); // Enabled after RETI
+        assert!(!state.ei_delay);
+    }
+
+    #[test]
+    fn test_handle_delayed_ime_preserves_ime_when_no_delay() {
+        let mut state = State::new();
+        state.ime = false;
+        state.ei_delay = false;
+        state.di_delay = false;
+        state.last_opcode = 0x00;
+
+        handle_delayed_ime(&mut state);
+
+        assert!(!state.ime); // IME remains false
     }
 }
