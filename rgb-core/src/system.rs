@@ -283,6 +283,11 @@ impl<M: Memory> GameBoy<M> {
             self.f &= !Self::FLAG_C;
         }
     }
+
+    /// Execute one CPU instruction
+    pub fn execute(&mut self) {
+        crate::instructions::execute(self);
+    }
 }
 
 impl Default for GameBoy<Mmu> {
@@ -319,10 +324,6 @@ impl GameBoy<FlatMemory> {
     }
 }
 
-/// Type alias for backward compatibility with tests
-/// Uses FlatMemory for simple, writable memory without banking complexities
-pub type State = GameBoy<FlatMemory>;
-
 /// Update timers based on cycles executed
 ///
 /// Game Boy timers:
@@ -330,7 +331,7 @@ pub type State = GameBoy<FlatMemory>;
 /// - TIMA (0xFF05): Timer counter, increments at frequency set by TAC
 /// - TMA (0xFF06): Timer modulo, loaded into TIMA when it overflows
 /// - TAC (0xFF07): Timer control (bit 2 = enable, bits 0-1 = clock select)
-pub fn update_timers(state: &mut State, cycles: u32) {
+pub fn update_timers<M: Memory>(state: &mut GameBoy<M>, cycles: u32) {
     use crate::io::{DIV, IF, TAC, TIMA, TMA};
 
     // Update DIV register (increments every 256 cycles = 16384 Hz)
@@ -389,7 +390,7 @@ mod tests {
 
     #[test]
     fn test_new_initializes_correct_values() {
-        let state = State::new();
+        let state = GameBoy::<FlatMemory>::new();
         assert_eq!(state.af(), 0x01B0);
         assert_eq!(state.bc(), 0x0013);
         assert_eq!(state.de(), 0x00D8);
@@ -400,7 +401,7 @@ mod tests {
 
     #[test]
     fn test_register_pairs_getter_setter() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.set_af(0xABCD);
         assert_eq!(state.af(), 0xABC0); // Lower 4 bits of F are always 0
@@ -423,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_memory_read_write() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         // Test writing and reading at various addresses
         state.write(0x0000, 0xAB);
@@ -441,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_read_word() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         // Test reading a word (little-endian: low byte first, high byte second)
         state.write(0x1000, 0x34); // Low byte
@@ -461,7 +462,7 @@ mod tests {
 
     #[test]
     fn test_write_word() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         // Test writing a word (little-endian: low byte first, high byte second)
         state.write_word(0x1000, 0x1234);
@@ -481,7 +482,7 @@ mod tests {
 
     #[test]
     fn test_read_write_word_roundtrip() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         // Test that write_word and read_word are inverses
         state.write_word(0x3000, 0x5678);
@@ -497,7 +498,7 @@ mod tests {
     #[test]
     fn test_update_timers_div() {
         use crate::io::DIV;
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.write(DIV, 0x00);
 
@@ -513,7 +514,7 @@ mod tests {
     #[test]
     fn test_update_timers_tima_disabled() {
         use crate::io::{TAC, TIMA};
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.write(TIMA, 0x00);
         state.write(TAC, 0x00); // Timer disabled
@@ -526,7 +527,7 @@ mod tests {
     #[test]
     fn test_update_timers_tima_enabled() {
         use crate::io::{TAC, TIMA, TMA};
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.write(TIMA, 0x00);
         state.write(TMA, 0x00);
@@ -544,7 +545,7 @@ mod tests {
     #[test]
     fn test_update_timers_overflow() {
         use crate::io::{IF, TAC, TIMA, TMA};
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.write(TIMA, 0xFF);
         state.write(TMA, 0x10);
@@ -562,7 +563,7 @@ mod tests {
     #[test]
     fn test_update_timers_fast_clock() {
         use crate::io::{TAC, TIMA};
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.write(TIMA, 0x00);
         state.write(TAC, 0x05); // Timer enabled, 262144 Hz (16 cycles per increment)

@@ -1,12 +1,16 @@
 use crate::io::{IE, IF};
-use crate::system::{State, update_timers};
+use crate::memory::Memory;
+use crate::system::{GameBoy, update_timers};
+
+#[cfg(test)]
+use crate::memory::FlatMemory;
 
 // Opcode constants for special instructions
 const OPCODE_DI: u8 = 0xF3; // Disable interrupts
 const OPCODE_EI: u8 = 0xFB; // Enable interrupts
 
 /// Check if there are any pending interrupts that should wake the CPU
-fn has_pending_interrupt(state: &State) -> bool {
+fn has_pending_interrupt<M: Memory>(state: &GameBoy<M>) -> bool {
     let ie = state.read(IE); // Interrupt Enable
     let if_flags = state.read(IF); // Interrupt Flags
 
@@ -16,7 +20,7 @@ fn has_pending_interrupt(state: &State) -> bool {
 
 /// Service pending interrupts if IME is enabled
 /// Returns true if an interrupt was serviced
-fn service_interrupts(state: &mut State) -> bool {
+fn service_interrupts<M: Memory>(state: &mut GameBoy<M>) -> bool {
     if !state.ime {
         return false;
     }
@@ -72,7 +76,7 @@ fn service_interrupts(state: &mut State) -> bool {
 /// N: Reset (addition operation)
 /// H: Set if carry from bit 3
 /// C: Set if carry from bit 7
-fn add_a(value: u8, state: &mut State) {
+fn add_a<M: Memory>(value: u8, state: &mut GameBoy<M>) {
     let a = state.a;
     let result = a.wrapping_add(value);
 
@@ -89,7 +93,7 @@ fn add_a(value: u8, state: &mut State) {
 /// N: Reset (addition operation)
 /// H: Set if carry from bit 3
 /// C: Set if carry from bit 7
-fn adc_a(value: u8, state: &mut State) {
+fn adc_a<M: Memory>(value: u8, state: &mut GameBoy<M>) {
     let a = state.a;
     let carry = if state.flag_c() { 1 } else { 0 };
     let result = a.wrapping_add(value).wrapping_add(carry);
@@ -107,7 +111,7 @@ fn adc_a(value: u8, state: &mut State) {
 /// N: Set (subtraction operation)
 /// H: Set if borrow from bit 4
 /// C: Set if borrow (A < value)
-fn sub_a(value: u8, state: &mut State) {
+fn sub_a<M: Memory>(value: u8, state: &mut GameBoy<M>) {
     let a = state.a;
     let result = a.wrapping_sub(value);
 
@@ -124,7 +128,7 @@ fn sub_a(value: u8, state: &mut State) {
 /// N: Set (subtraction operation)
 /// H: Set if borrow from bit 4
 /// C: Set if borrow
-fn sbc_a(value: u8, state: &mut State) {
+fn sbc_a<M: Memory>(value: u8, state: &mut GameBoy<M>) {
     let a = state.a;
     let carry = if state.flag_c() { 1 } else { 0 };
     let result = a.wrapping_sub(value).wrapping_sub(carry);
@@ -142,7 +146,7 @@ fn sbc_a(value: u8, state: &mut State) {
 /// N: Reset
 /// H: Set (always)
 /// C: Reset
-fn and_a(value: u8, state: &mut State) {
+fn and_a<M: Memory>(value: u8, state: &mut GameBoy<M>) {
     let result = state.a & value;
 
     state.set_flag_z(result == 0);
@@ -158,7 +162,7 @@ fn and_a(value: u8, state: &mut State) {
 /// N: Reset
 /// H: Reset
 /// C: Reset
-fn xor_a(value: u8, state: &mut State) {
+fn xor_a<M: Memory>(value: u8, state: &mut GameBoy<M>) {
     let result = state.a ^ value;
 
     state.set_flag_z(result == 0);
@@ -174,7 +178,7 @@ fn xor_a(value: u8, state: &mut State) {
 /// N: Reset
 /// H: Reset
 /// C: Reset
-fn or_a(value: u8, state: &mut State) {
+fn or_a<M: Memory>(value: u8, state: &mut GameBoy<M>) {
     let result = state.a | value;
 
     state.set_flag_z(result == 0);
@@ -190,7 +194,7 @@ fn or_a(value: u8, state: &mut State) {
 /// N: Set (subtraction operation)
 /// H: Set if borrow from bit 4
 /// C: Set if borrow (A < value)
-fn cp_a(value: u8, state: &mut State) {
+fn cp_a<M: Memory>(value: u8, state: &mut GameBoy<M>) {
     let a = state.a;
     let result = a.wrapping_sub(value);
 
@@ -203,14 +207,14 @@ fn cp_a(value: u8, state: &mut State) {
 }
 
 /// Read immediate byte from PC and advance PC
-fn read_immediate_byte(state: &mut State) -> u8 {
+fn read_immediate_byte<M: Memory>(state: &mut GameBoy<M>) -> u8 {
     let value = state.read(state.pc);
     state.pc += 1;
     value
 }
 
 /// Read immediate 16-bit word from PC and advance PC (little-endian)
-fn read_immediate_word(state: &mut State) -> u16 {
+fn read_immediate_word<M: Memory>(state: &mut GameBoy<M>) -> u16 {
     let low = state.read(state.pc);
     state.pc += 1;
     let high = state.read(state.pc);
@@ -219,7 +223,7 @@ fn read_immediate_word(state: &mut State) -> u16 {
 }
 
 /// Pop word (16-bit) value from stack (little-endian)
-fn pop_word(state: &mut State) -> u16 {
+fn pop_word<M: Memory>(state: &mut GameBoy<M>) -> u16 {
     // Pop low byte
     let low = state.read(state.sp);
     state.sp = state.sp.wrapping_add(1);
@@ -233,78 +237,78 @@ fn pop_word(state: &mut State) -> u16 {
 }
 
 /// Return from subroutine - pop PC from stack
-fn ret(state: &mut State) {
+fn ret<M: Memory>(state: &mut GameBoy<M>) {
     state.pc = pop_word(state);
 }
 
 /// Return from subroutine if Z flag is clear (NZ)
-fn ret_nz(state: &mut State) {
+fn ret_nz<M: Memory>(state: &mut GameBoy<M>) {
     if !state.flag_z() {
         ret(state);
     }
 }
 
 /// Return from subroutine if Z flag is set (Z)
-fn ret_z(state: &mut State) {
+fn ret_z<M: Memory>(state: &mut GameBoy<M>) {
     if state.flag_z() {
         ret(state);
     }
 }
 
 /// Return from subroutine if C flag is clear (NC)
-fn ret_nc(state: &mut State) {
+fn ret_nc<M: Memory>(state: &mut GameBoy<M>) {
     if !state.flag_c() {
         ret(state);
     }
 }
 
 /// Return from subroutine if C flag is set (C)
-fn ret_c(state: &mut State) {
+fn ret_c<M: Memory>(state: &mut GameBoy<M>) {
     if state.flag_c() {
         ret(state);
     }
 }
 
 /// Return from interrupt - pop PC and enable interrupts
-fn reti(state: &mut State) {
+fn reti<M: Memory>(state: &mut GameBoy<M>) {
     ret(state);
     state.ime = true; // Enable interrupts
 }
 
 /// Pop 16-bit value from stack into BC register pair
-fn pop_bc(state: &mut State) {
+fn pop_bc<M: Memory>(state: &mut GameBoy<M>) {
     let value = pop_word(state);
     state.c = value as u8; // Low byte
     state.b = (value >> 8) as u8; // High byte
 }
 
 /// Pop 16-bit value from stack into DE register pair
-fn pop_de(state: &mut State) {
+fn pop_de<M: Memory>(state: &mut GameBoy<M>) {
     let value = pop_word(state);
     state.e = value as u8; // Low byte
     state.d = (value >> 8) as u8; // High byte
 }
 
 /// Push DE register pair onto stack
-fn push_de(state: &mut State) {
+fn push_de<M: Memory>(state: &mut GameBoy<M>) {
     let value = ((state.d as u16) << 8) | (state.e as u16);
     push_word(value, state);
 }
 
 /// Push BC register pair onto stack
-fn push_bc(state: &mut State) {
+fn push_bc<M: Memory>(state: &mut GameBoy<M>) {
     let value = ((state.b as u16) << 8) | (state.c as u16);
     push_word(value, state);
 }
 
 /// Jump to absolute 16-bit address
-fn jp(state: &mut State) {
+fn jp<M: Memory>(state: &mut GameBoy<M>) {
     let address = read_immediate_word(state);
     state.pc = address;
 }
 
 /// Jump to absolute address if Z flag is clear (NZ)
-fn jp_nz(state: &mut State) {
+fn jp_nz<M: Memory>(state: &mut GameBoy<M>) {
     let address = read_immediate_word(state);
     if !state.flag_z() {
         state.pc = address;
@@ -312,7 +316,7 @@ fn jp_nz(state: &mut State) {
 }
 
 /// Jump to absolute address if Z flag is set (Z)
-fn jp_z(state: &mut State) {
+fn jp_z<M: Memory>(state: &mut GameBoy<M>) {
     let address = read_immediate_word(state);
     if state.flag_z() {
         state.pc = address;
@@ -320,7 +324,7 @@ fn jp_z(state: &mut State) {
 }
 
 /// Jump to absolute address if C flag is clear (NC)
-fn jp_nc(state: &mut State) {
+fn jp_nc<M: Memory>(state: &mut GameBoy<M>) {
     let address = read_immediate_word(state);
     if !state.flag_c() {
         state.pc = address;
@@ -328,7 +332,7 @@ fn jp_nc(state: &mut State) {
 }
 
 /// Jump to absolute address if C flag is set (C)
-fn jp_c(state: &mut State) {
+fn jp_c<M: Memory>(state: &mut GameBoy<M>) {
     let address = read_immediate_word(state);
     if state.flag_c() {
         state.pc = address;
@@ -336,7 +340,7 @@ fn jp_c(state: &mut State) {
 }
 
 /// Push word (16-bit) value onto stack (little-endian)
-fn push_word(value: u16, state: &mut State) {
+fn push_word<M: Memory>(value: u16, state: &mut GameBoy<M>) {
     // Push high byte first
     state.sp = state.sp.wrapping_sub(1);
     state.write(state.sp, (value >> 8) as u8);
@@ -347,7 +351,7 @@ fn push_word(value: u16, state: &mut State) {
 }
 
 /// Call subroutine - push return address and jump to address
-fn call(state: &mut State) {
+fn call<M: Memory>(state: &mut GameBoy<M>) {
     // Push return address (PC + 2, after reading the 2-byte address)
     push_word(state.pc + 2, state);
     // Jump to the target address
@@ -355,7 +359,7 @@ fn call(state: &mut State) {
 }
 
 /// Call subroutine if Z flag is clear (NZ)
-fn call_nz(state: &mut State) {
+fn call_nz<M: Memory>(state: &mut GameBoy<M>) {
     if !state.flag_z() {
         call(state);
     } else {
@@ -365,7 +369,7 @@ fn call_nz(state: &mut State) {
 }
 
 /// Call subroutine if Z flag is set (Z)
-fn call_z(state: &mut State) {
+fn call_z<M: Memory>(state: &mut GameBoy<M>) {
     if state.flag_z() {
         call(state);
     } else {
@@ -375,7 +379,7 @@ fn call_z(state: &mut State) {
 }
 
 /// Call subroutine if C flag is clear (NC)
-fn call_nc(state: &mut State) {
+fn call_nc<M: Memory>(state: &mut GameBoy<M>) {
     if !state.flag_c() {
         call(state);
     } else {
@@ -385,7 +389,7 @@ fn call_nc(state: &mut State) {
 }
 
 /// Call subroutine if C flag is set (C)
-fn call_c(state: &mut State) {
+fn call_c<M: Memory>(state: &mut GameBoy<M>) {
     if state.flag_c() {
         call(state);
     } else {
@@ -395,58 +399,58 @@ fn call_c(state: &mut State) {
 }
 
 /// RST 00h - Push PC and jump to address 0x0000
-fn rst_00(state: &mut State) {
+fn rst_00<M: Memory>(state: &mut GameBoy<M>) {
     push_word(state.pc, state);
     state.pc = 0x0000;
 }
 
 /// RST 08h - Push PC and jump to address 0x0008
-fn rst_08(state: &mut State) {
+fn rst_08<M: Memory>(state: &mut GameBoy<M>) {
     push_word(state.pc, state);
     state.pc = 0x0008;
 }
 
 /// RST 10h - Push PC and jump to address 0x0010
-fn rst_10(state: &mut State) {
+fn rst_10<M: Memory>(state: &mut GameBoy<M>) {
     push_word(state.pc, state);
     state.pc = 0x0010;
 }
 
 /// RST 18h - Push PC and jump to address 0x0018
-fn rst_18(state: &mut State) {
+fn rst_18<M: Memory>(state: &mut GameBoy<M>) {
     push_word(state.pc, state);
     state.pc = 0x0018;
 }
 
 /// Pop 16-bit value from stack into HL register pair
-fn pop_hl(state: &mut State) {
+fn pop_hl<M: Memory>(state: &mut GameBoy<M>) {
     let value = pop_word(state);
     state.l = value as u8; // Low byte
     state.h = (value >> 8) as u8; // High byte
 }
 
 /// Push HL register pair onto stack
-fn push_hl(state: &mut State) {
+fn push_hl<M: Memory>(state: &mut GameBoy<M>) {
     let value = ((state.h as u16) << 8) | (state.l as u16);
     push_word(value, state);
 }
 
 /// LDH (n),A - Load A into high memory (0xFF00 + n)
-fn ldh_n_a(state: &mut State) {
+fn ldh_n_a<M: Memory>(state: &mut GameBoy<M>) {
     let offset = read_immediate_byte(state);
     let address = 0xFF00 | (offset as u16);
     state.write(address, state.a);
 }
 
 /// LDH (C),A - Load A into high memory (0xFF00 + C)
-fn ldh_c_a(state: &mut State) {
+fn ldh_c_a<M: Memory>(state: &mut GameBoy<M>) {
     let address = 0xFF00 | (state.c as u16);
     state.write(address, state.a);
 }
 
 /// Illegal/undefined opcode handler
 /// Panics with error message showing the opcode and PC location
-fn illegal_opcode(opcode: u8, state: &State) -> ! {
+fn illegal_opcode<M: Memory>(opcode: u8, state: &GameBoy<M>) -> ! {
     panic!(
         "Illegal/undefined opcode 0x{:02X} at PC: 0x{:04X}",
         opcode,
@@ -455,25 +459,25 @@ fn illegal_opcode(opcode: u8, state: &State) -> ! {
 }
 
 /// RST 20h - Push PC and jump to address 0x0020
-fn rst_20(state: &mut State) {
+fn rst_20<M: Memory>(state: &mut GameBoy<M>) {
     push_word(state.pc, state);
     state.pc = 0x0020;
 }
 
 /// RST 28h - Push PC and jump to address 0x0028
-fn rst_28(state: &mut State) {
+fn rst_28<M: Memory>(state: &mut GameBoy<M>) {
     push_word(state.pc, state);
     state.pc = 0x0028;
 }
 
 /// RST 30h - Push PC and jump to address 0x0030
-fn rst_30(state: &mut State) {
+fn rst_30<M: Memory>(state: &mut GameBoy<M>) {
     push_word(state.pc, state);
     state.pc = 0x0030;
 }
 
 /// RST 38h - Push PC and jump to address 0x0038
-fn rst_38(state: &mut State) {
+fn rst_38<M: Memory>(state: &mut GameBoy<M>) {
     push_word(state.pc, state);
     state.pc = 0x0038;
 }
@@ -483,7 +487,7 @@ fn rst_38(state: &mut State) {
 /// N: Reset
 /// H: Set if carry from bit 3
 /// C: Set if carry from bit 7
-fn add_sp_n(state: &mut State) {
+fn add_sp_n<M: Memory>(state: &mut GameBoy<M>) {
     let offset = read_immediate_byte(state) as i8;
     let sp = state.sp;
     let result = sp.wrapping_add(offset as u16);
@@ -498,25 +502,25 @@ fn add_sp_n(state: &mut State) {
 }
 
 /// JP HL - Jump to address in HL
-fn jp_hl(state: &mut State) {
+fn jp_hl<M: Memory>(state: &mut GameBoy<M>) {
     state.pc = state.hl();
 }
 
 /// LD (nn),A - Load A into memory at absolute address
-fn ld_nn_a(state: &mut State) {
+fn ld_nn_a<M: Memory>(state: &mut GameBoy<M>) {
     let address = read_immediate_word(state);
     state.write(address, state.a);
 }
 
 /// LDH A,(n) - Load from high memory (0xFF00 + n) into A
-fn ldh_a_n(state: &mut State) {
+fn ldh_a_n<M: Memory>(state: &mut GameBoy<M>) {
     let offset = read_immediate_byte(state);
     let address = 0xFF00 | (offset as u16);
     state.a = state.read(address);
 }
 
 /// LDH A,(C) - Load from high memory (0xFF00 + C) into A
-fn ldh_a_c(state: &mut State) {
+fn ldh_a_c<M: Memory>(state: &mut GameBoy<M>) {
     let address = 0xFF00 | (state.c as u16);
     state.a = state.read(address);
 }
@@ -526,7 +530,7 @@ fn ldh_a_c(state: &mut State) {
 /// N: Reset
 /// H: Set if carry from bit 3
 /// C: Set if carry from bit 7
-fn ld_hl_sp_n(state: &mut State) {
+fn ld_hl_sp_n<M: Memory>(state: &mut GameBoy<M>) {
     let offset = read_immediate_byte(state) as i8;
     let sp = state.sp;
     let result = sp.wrapping_add(offset as u16);
@@ -541,20 +545,20 @@ fn ld_hl_sp_n(state: &mut State) {
 }
 
 /// LD A,(nn) - Load from absolute address into A
-fn ld_a_nn(state: &mut State) {
+fn ld_a_nn<M: Memory>(state: &mut GameBoy<M>) {
     let address = read_immediate_word(state);
     state.a = state.read(address);
 }
 
 /// Pop 16-bit value from stack into AF register pair
-fn pop_af(state: &mut State) {
+fn pop_af<M: Memory>(state: &mut GameBoy<M>) {
     let value = pop_word(state);
     state.f = value as u8; // Low byte (flags)
     state.a = (value >> 8) as u8; // High byte
 }
 
 /// Push AF register pair onto stack
-fn push_af(state: &mut State) {
+fn push_af<M: Memory>(state: &mut GameBoy<M>) {
     let value = ((state.a as u16) << 8) | (state.f as u16);
     push_word(value, state);
 }
@@ -567,7 +571,7 @@ fn push_af(state: &mut State) {
 /// HALT bug (IME=0 and pending interrupt):
 ///   - CPU exits HALT immediately but PC is NOT incremented
 ///   - This causes the next instruction byte to be read twice
-fn halt(state: &mut State) {
+fn halt<M: Memory>(state: &mut GameBoy<M>) {
     // Check for HALT bug: when IME=0 and there's a pending interrupt
     if !state.ime && has_pending_interrupt(state) {
         // HALT bug: CPU exits HALT immediately but PC is not incremented
@@ -589,7 +593,7 @@ fn halt(state: &mut State) {
 /// - If last instruction WAS EI/DI, keep the delay for one more instruction
 ///
 /// Must be called BEFORE halt check so IME changes are processed even when halted
-fn handle_delayed_ime(state: &mut State) {
+fn handle_delayed_ime<M: Memory>(state: &mut GameBoy<M>) {
     // Handle delayed interrupt disable (DI instruction)
     if state.di_delay {
         if state.last_opcode != OPCODE_DI {
@@ -626,7 +630,7 @@ fn handle_delayed_ime(state: &mut State) {
 ///
 /// Not halted:
 ///   - Returns true to continue normal execution
-fn handle_halt(state: &mut State) -> bool {
+fn handle_halt<M: Memory>(state: &mut GameBoy<M>) -> bool {
     // Handle HALT bug: PC should not increment after HALT when bug is triggered
     // This causes the next instruction byte to be read twice
     if state.halt_bug {
@@ -654,7 +658,7 @@ fn handle_halt(state: &mut State) -> bool {
 }
 
 /// Increment a byte value by 1 and update flags accordingly
-fn inc_byte(value: u8, state: &mut State) -> u8 {
+fn inc_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let result = value.wrapping_add(1);
     state.set_flag_z(result == 0);
     state.set_flag_n(false);
@@ -663,42 +667,42 @@ fn inc_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Increment the register A by 1 and update flags accordingly
-fn inc_a(state: &mut State) {
+fn inc_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = inc_byte(state.a, state);
 }
 
 // Increment the register B by 1 and update flags accordingly
-fn inc_b(state: &mut State) {
+fn inc_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = inc_byte(state.b, state);
 }
 
 // Increment the register C by 1 and update flags accordingly
-fn inc_c(state: &mut State) {
+fn inc_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = inc_byte(state.c, state);
 }
 
 /// Increment the register D by 1 and update flags accordingly
-fn inc_d(state: &mut State) {
+fn inc_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = inc_byte(state.d, state);
 }
 
 /// Increment the register E by 1 and update flags accordingly
-fn inc_e(state: &mut State) {
+fn inc_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = inc_byte(state.e, state);
 }
 
 /// Increment the register H by 1 and update flags accordingly
-fn inc_h(state: &mut State) {
+fn inc_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = inc_byte(state.h, state);
 }
 
 /// Increment the register L by 1 and update flags accordingly
-fn inc_l(state: &mut State) {
+fn inc_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = inc_byte(state.l, state);
 }
 
 /// Decrement a byte value by 1 and update flags accordingly
-fn dec_byte(value: u8, state: &mut State) -> u8 {
+fn dec_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let result = value.wrapping_sub(1);
     state.set_flag_z(result == 0);
     state.set_flag_n(true);
@@ -707,42 +711,42 @@ fn dec_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Decrement the register A by 1 and update flags accordingly
-fn dec_a(state: &mut State) {
+fn dec_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = dec_byte(state.a, state);
 }
 
 /// Decrement the register B by 1 and update flags accordingly
-fn dec_b(state: &mut State) {
+fn dec_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = dec_byte(state.b, state);
 }
 
 /// Decrement the register C by 1 and update flags accordingly
-fn dec_c(state: &mut State) {
+fn dec_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = dec_byte(state.c, state);
 }
 
 /// Decrement the register D by 1 and update flags accordingly
-fn dec_d(state: &mut State) {
+fn dec_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = dec_byte(state.d, state);
 }
 
 /// Decrement the register E by 1 and update flags accordingly
-fn dec_e(state: &mut State) {
+fn dec_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = dec_byte(state.e, state);
 }
 
 /// Decrement the register H by 1 and update flags accordingly
-fn dec_h(state: &mut State) {
+fn dec_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = dec_byte(state.h, state);
 }
 
 /// Decrement the register L by 1 and update flags accordingly
-fn dec_l(state: &mut State) {
+fn dec_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = dec_byte(state.l, state);
 }
 
 /// Rotate left circular (RLC) - rotates value left, bit 7 goes to carry and bit 0
-fn rlc_byte(value: u8, state: &mut State) -> u8 {
+fn rlc_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let bit7 = (value & 0x80) != 0;
     let result = (value << 1) | (if bit7 { 1 } else { 0 });
 
@@ -755,42 +759,42 @@ fn rlc_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Rotate register A left circular
-fn rlc_a(state: &mut State) {
+fn rlc_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = rlc_byte(state.a, state);
 }
 
 /// Rotate register B left circular
-fn rlc_b(state: &mut State) {
+fn rlc_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = rlc_byte(state.b, state);
 }
 
 /// Rotate register C left circular
-fn rlc_c(state: &mut State) {
+fn rlc_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = rlc_byte(state.c, state);
 }
 
 /// Rotate register D left circular
-fn rlc_d(state: &mut State) {
+fn rlc_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = rlc_byte(state.d, state);
 }
 
 /// Rotate register E left circular
-fn rlc_e(state: &mut State) {
+fn rlc_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = rlc_byte(state.e, state);
 }
 
 /// Rotate register H left circular
-fn rlc_h(state: &mut State) {
+fn rlc_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = rlc_byte(state.h, state);
 }
 
 /// Rotate register L left circular
-fn rlc_l(state: &mut State) {
+fn rlc_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = rlc_byte(state.l, state);
 }
 
 /// Rotate value at (HL) left circular
-fn rlc_hl_indirect(state: &mut State) {
+fn rlc_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = rlc_byte(value, state);
@@ -798,7 +802,7 @@ fn rlc_hl_indirect(state: &mut State) {
 }
 
 /// Rotate value at (HL) right circular
-fn rrc_hl_indirect(state: &mut State) {
+fn rrc_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = rrc_byte(value, state);
@@ -806,7 +810,7 @@ fn rrc_hl_indirect(state: &mut State) {
 }
 
 /// Rotate left through carry - value at (HL)
-fn rl_hl_indirect(state: &mut State) {
+fn rl_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = rl_byte(value, state);
@@ -814,7 +818,7 @@ fn rl_hl_indirect(state: &mut State) {
 }
 
 /// Rotate right through carry - value at (HL)
-fn rr_hl_indirect(state: &mut State) {
+fn rr_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = rr_byte(value, state);
@@ -822,13 +826,13 @@ fn rr_hl_indirect(state: &mut State) {
 }
 
 /// RLCA - Rotate A left circular (always resets Z flag)
-fn rlca(state: &mut State) {
+fn rlca<M: Memory>(state: &mut GameBoy<M>) {
     state.a = rlc_byte(state.a, state);
     state.set_flag_z(false); // RLCA always resets Z flag
 }
 
 /// Rotate right circular (RRC) - rotates value right, bit 0 goes to carry and bit 7
-fn rrc_byte(value: u8, state: &mut State) -> u8 {
+fn rrc_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let bit0 = (value & 0x01) != 0;
     let result = (value >> 1) | (if bit0 { 0x80 } else { 0 });
 
@@ -841,49 +845,49 @@ fn rrc_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Rotate register A right circular
-fn rrc_a(state: &mut State) {
+fn rrc_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = rrc_byte(state.a, state);
 }
 
 /// Rotate register B right circular
-fn rrc_b(state: &mut State) {
+fn rrc_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = rrc_byte(state.b, state);
 }
 
 /// Rotate register C right circular
-fn rrc_c(state: &mut State) {
+fn rrc_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = rrc_byte(state.c, state);
 }
 
 /// Rotate register D right circular
-fn rrc_d(state: &mut State) {
+fn rrc_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = rrc_byte(state.d, state);
 }
 
 /// Rotate register E right circular
-fn rrc_e(state: &mut State) {
+fn rrc_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = rrc_byte(state.e, state);
 }
 
 /// Rotate register H right circular
-fn rrc_h(state: &mut State) {
+fn rrc_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = rrc_byte(state.h, state);
 }
 
 /// Rotate register L right circular
-fn rrc_l(state: &mut State) {
+fn rrc_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = rrc_byte(state.l, state);
 }
 
 /// RRCA - Rotate A right circular (always resets Z flag)
-fn rrca(state: &mut State) {
+fn rrca<M: Memory>(state: &mut GameBoy<M>) {
     state.a = rrc_byte(state.a, state);
     state.set_flag_z(false); // RRCA always resets Z flag
 }
 
 /// Rotate left through carry (RL) - rotates value left through carry flag
 /// Old carry goes to bit 0, bit 7 goes to carry
-fn rl_byte(value: u8, state: &mut State) -> u8 {
+fn rl_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let bit7 = (value & 0x80) != 0;
     let old_carry = if state.flag_c() { 1 } else { 0 };
     let result = (value << 1) | old_carry;
@@ -897,49 +901,49 @@ fn rl_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Rotate register A left through carry
-fn rl_a(state: &mut State) {
+fn rl_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = rl_byte(state.a, state);
 }
 
 /// Rotate register B left through carry
-fn rl_b(state: &mut State) {
+fn rl_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = rl_byte(state.b, state);
 }
 
 /// Rotate register C left through carry
-fn rl_c(state: &mut State) {
+fn rl_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = rl_byte(state.c, state);
 }
 
 /// Rotate register D left through carry
-fn rl_d(state: &mut State) {
+fn rl_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = rl_byte(state.d, state);
 }
 
 /// Rotate register E left through carry
-fn rl_e(state: &mut State) {
+fn rl_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = rl_byte(state.e, state);
 }
 
 /// Rotate register H left through carry
-fn rl_h(state: &mut State) {
+fn rl_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = rl_byte(state.h, state);
 }
 
 /// Rotate register L left through carry
-fn rl_l(state: &mut State) {
+fn rl_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = rl_byte(state.l, state);
 }
 
 /// RLA - Rotate A left through carry (always resets Z flag)
-fn rla(state: &mut State) {
+fn rla<M: Memory>(state: &mut GameBoy<M>) {
     state.a = rl_byte(state.a, state);
     state.set_flag_z(false); // RLA always resets Z flag
 }
 
 /// Rotate right through carry (RR) - rotates value right through carry flag
 /// Old carry goes to bit 7, bit 0 goes to carry
-fn rr_byte(value: u8, state: &mut State) -> u8 {
+fn rr_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let bit0 = (value & 0x01) != 0;
     let old_carry = if state.flag_c() { 0x80 } else { 0 };
     let result = (value >> 1) | old_carry;
@@ -953,49 +957,49 @@ fn rr_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Rotate register A right through carry
-fn rr_a(state: &mut State) {
+fn rr_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = rr_byte(state.a, state);
 }
 
 /// Rotate register B right through carry
-fn rr_b(state: &mut State) {
+fn rr_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = rr_byte(state.b, state);
 }
 
 /// Rotate register C right through carry
-fn rr_c(state: &mut State) {
+fn rr_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = rr_byte(state.c, state);
 }
 
 /// Rotate register D right through carry
-fn rr_d(state: &mut State) {
+fn rr_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = rr_byte(state.d, state);
 }
 
 /// Rotate register E right through carry
-fn rr_e(state: &mut State) {
+fn rr_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = rr_byte(state.e, state);
 }
 
 /// Rotate register H right through carry
-fn rr_h(state: &mut State) {
+fn rr_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = rr_byte(state.h, state);
 }
 
 /// Rotate register L right through carry
-fn rr_l(state: &mut State) {
+fn rr_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = rr_byte(state.l, state);
 }
 
 /// RRA - Rotate A right through carry (always resets Z flag)
-fn rra(state: &mut State) {
+fn rra<M: Memory>(state: &mut GameBoy<M>) {
     state.a = rr_byte(state.a, state);
     state.set_flag_z(false); // RRA always resets Z flag
 }
 
 /// SLA - Shift Left Arithmetic
 /// Shifts value left, bit 7 goes to carry, bit 0 becomes 0
-fn sla_byte(value: u8, state: &mut State) -> u8 {
+fn sla_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let bit7 = (value & 0x80) != 0;
     let result = value << 1;
 
@@ -1008,42 +1012,42 @@ fn sla_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Shift register A left arithmetic
-fn sla_a(state: &mut State) {
+fn sla_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = sla_byte(state.a, state);
 }
 
 /// Shift register B left arithmetic
-fn sla_b(state: &mut State) {
+fn sla_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = sla_byte(state.b, state);
 }
 
 /// Shift register C left arithmetic
-fn sla_c(state: &mut State) {
+fn sla_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = sla_byte(state.c, state);
 }
 
 /// Shift register D left arithmetic
-fn sla_d(state: &mut State) {
+fn sla_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = sla_byte(state.d, state);
 }
 
 /// Shift register E left arithmetic
-fn sla_e(state: &mut State) {
+fn sla_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = sla_byte(state.e, state);
 }
 
 /// Shift register H left arithmetic
-fn sla_h(state: &mut State) {
+fn sla_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = sla_byte(state.h, state);
 }
 
 /// Shift register L left arithmetic
-fn sla_l(state: &mut State) {
+fn sla_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = sla_byte(state.l, state);
 }
 
 /// Shift value at (HL) left arithmetic
-fn sla_hl_indirect(state: &mut State) {
+fn sla_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = sla_byte(value, state);
@@ -1052,7 +1056,7 @@ fn sla_hl_indirect(state: &mut State) {
 
 /// SRA - Shift Right Arithmetic
 /// Shifts value right, bit 0 goes to carry, bit 7 stays the same (preserves sign)
-fn sra_byte(value: u8, state: &mut State) -> u8 {
+fn sra_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let bit0 = (value & 0x01) != 0;
     let bit7 = value & 0x80; // Preserve the sign bit
     let result = (value >> 1) | bit7;
@@ -1066,42 +1070,42 @@ fn sra_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Shift register A right arithmetic
-fn sra_a(state: &mut State) {
+fn sra_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = sra_byte(state.a, state);
 }
 
 /// Shift register B right arithmetic
-fn sra_b(state: &mut State) {
+fn sra_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = sra_byte(state.b, state);
 }
 
 /// Shift register C right arithmetic
-fn sra_c(state: &mut State) {
+fn sra_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = sra_byte(state.c, state);
 }
 
 /// Shift register D right arithmetic
-fn sra_d(state: &mut State) {
+fn sra_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = sra_byte(state.d, state);
 }
 
 /// Shift register E right arithmetic
-fn sra_e(state: &mut State) {
+fn sra_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = sra_byte(state.e, state);
 }
 
 /// Shift register H right arithmetic
-fn sra_h(state: &mut State) {
+fn sra_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = sra_byte(state.h, state);
 }
 
 /// Shift register L right arithmetic
-fn sra_l(state: &mut State) {
+fn sra_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = sra_byte(state.l, state);
 }
 
 /// Shift value at (HL) right arithmetic
-fn sra_hl_indirect(state: &mut State) {
+fn sra_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = sra_byte(value, state);
@@ -1110,7 +1114,7 @@ fn sra_hl_indirect(state: &mut State) {
 
 /// SWAP - Swap upper and lower nibbles
 /// Exchanges the upper 4 bits with the lower 4 bits
-fn swap_byte(value: u8, state: &mut State) -> u8 {
+fn swap_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let result = ((value & 0x0F) << 4) | ((value & 0xF0) >> 4);
 
     state.set_flag_z(result == 0);
@@ -1122,42 +1126,42 @@ fn swap_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Swap register A nibbles
-fn swap_a(state: &mut State) {
+fn swap_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = swap_byte(state.a, state);
 }
 
 /// Swap register B nibbles
-fn swap_b(state: &mut State) {
+fn swap_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = swap_byte(state.b, state);
 }
 
 /// Swap register C nibbles
-fn swap_c(state: &mut State) {
+fn swap_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = swap_byte(state.c, state);
 }
 
 /// Swap register D nibbles
-fn swap_d(state: &mut State) {
+fn swap_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = swap_byte(state.d, state);
 }
 
 /// Swap register E nibbles
-fn swap_e(state: &mut State) {
+fn swap_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = swap_byte(state.e, state);
 }
 
 /// Swap register H nibbles
-fn swap_h(state: &mut State) {
+fn swap_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = swap_byte(state.h, state);
 }
 
 /// Swap register L nibbles
-fn swap_l(state: &mut State) {
+fn swap_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = swap_byte(state.l, state);
 }
 
 /// Swap value at (HL) nibbles
-fn swap_hl_indirect(state: &mut State) {
+fn swap_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = swap_byte(value, state);
@@ -1166,7 +1170,7 @@ fn swap_hl_indirect(state: &mut State) {
 
 /// SRL - Shift Right Logical
 /// Shifts value right, bit 0 goes to carry, bit 7 becomes 0
-fn srl_byte(value: u8, state: &mut State) -> u8 {
+fn srl_byte<M: Memory>(value: u8, state: &mut GameBoy<M>) -> u8 {
     let bit0 = (value & 0x01) != 0;
     let result = value >> 1;
 
@@ -1179,42 +1183,42 @@ fn srl_byte(value: u8, state: &mut State) -> u8 {
 }
 
 /// Shift register A right logical
-fn srl_a(state: &mut State) {
+fn srl_a<M: Memory>(state: &mut GameBoy<M>) {
     state.a = srl_byte(state.a, state);
 }
 
 /// Shift register B right logical
-fn srl_b(state: &mut State) {
+fn srl_b<M: Memory>(state: &mut GameBoy<M>) {
     state.b = srl_byte(state.b, state);
 }
 
 /// Shift register C right logical
-fn srl_c(state: &mut State) {
+fn srl_c<M: Memory>(state: &mut GameBoy<M>) {
     state.c = srl_byte(state.c, state);
 }
 
 /// Shift register D right logical
-fn srl_d(state: &mut State) {
+fn srl_d<M: Memory>(state: &mut GameBoy<M>) {
     state.d = srl_byte(state.d, state);
 }
 
 /// Shift register E right logical
-fn srl_e(state: &mut State) {
+fn srl_e<M: Memory>(state: &mut GameBoy<M>) {
     state.e = srl_byte(state.e, state);
 }
 
 /// Shift register H right logical
-fn srl_h(state: &mut State) {
+fn srl_h<M: Memory>(state: &mut GameBoy<M>) {
     state.h = srl_byte(state.h, state);
 }
 
 /// Shift register L right logical
-fn srl_l(state: &mut State) {
+fn srl_l<M: Memory>(state: &mut GameBoy<M>) {
     state.l = srl_byte(state.l, state);
 }
 
 /// Shift value at (HL) right logical
-fn srl_hl_indirect(state: &mut State) {
+fn srl_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = srl_byte(value, state);
@@ -1223,7 +1227,7 @@ fn srl_hl_indirect(state: &mut State) {
 
 /// BIT - Test bit in value
 /// Tests if a specific bit is set, sets Z flag if bit is 0
-fn bit_test(value: u8, bit: u8, state: &mut State) {
+fn bit_test<M: Memory>(value: u8, bit: u8, state: &mut GameBoy<M>) {
     let bit_set = (value & (1 << bit)) != 0;
     state.set_flag_z(!bit_set);
     state.set_flag_n(false);
@@ -1245,14 +1249,14 @@ fn set_bit(value: u8, bit: u8) -> u8 {
 
 /// JR - Jump relative (unconditional)
 /// Adds a signed 8-bit offset to PC
-fn jr(state: &mut State) {
+fn jr<M: Memory>(state: &mut GameBoy<M>) {
     let offset = read_immediate_byte(state) as i8;
     // Add the signed offset to PC
     state.pc = state.pc.wrapping_add(offset as u16);
 }
 
 /// JR NZ - Jump relative if not zero (Z flag is not set)
-fn jr_nz(state: &mut State) {
+fn jr_nz<M: Memory>(state: &mut GameBoy<M>) {
     let offset = read_immediate_byte(state) as i8;
 
     if !state.flag_z() {
@@ -1264,7 +1268,7 @@ fn jr_nz(state: &mut State) {
 /// Adjusts the accumulator for BCD (Binary Coded Decimal) arithmetic
 /// after addition or subtraction operations
 /// see: https://blog.ollien.com/posts/gb-daa/
-fn daa(state: &mut State) {
+fn daa<M: Memory>(state: &mut GameBoy<M>) {
     let mut a = state.a;
     let mut adjust = 0u8;
 
@@ -1289,7 +1293,7 @@ fn daa(state: &mut State) {
 }
 
 /// JR Z - Jump relative if zero (Z flag is set)
-fn jr_z(state: &mut State) {
+fn jr_z<M: Memory>(state: &mut GameBoy<M>) {
     let offset = read_immediate_byte(state) as i8;
 
     if state.flag_z() {
@@ -1298,7 +1302,7 @@ fn jr_z(state: &mut State) {
 }
 
 /// JR NC - Jump relative if not carry (C flag is not set)
-fn jr_nc(state: &mut State) {
+fn jr_nc<M: Memory>(state: &mut GameBoy<M>) {
     let offset = read_immediate_byte(state) as i8;
 
     if !state.flag_c() {
@@ -1307,7 +1311,7 @@ fn jr_nc(state: &mut State) {
 }
 
 /// JR C - Jump relative if carry (C flag is set)
-fn jr_c(state: &mut State) {
+fn jr_c<M: Memory>(state: &mut GameBoy<M>) {
     let offset = read_immediate_byte(state) as i8;
 
     if state.flag_c() {
@@ -1316,28 +1320,28 @@ fn jr_c(state: &mut State) {
 }
 
 /// CPL - Complement accumulator (flip all bits)
-fn cpl(state: &mut State) {
+fn cpl<M: Memory>(state: &mut GameBoy<M>) {
     state.a = !state.a;
     state.set_flag_n(true);
     state.set_flag_h(true);
 }
 
 /// SCF - Set Carry Flag
-fn scf(state: &mut State) {
+fn scf<M: Memory>(state: &mut GameBoy<M>) {
     state.set_flag_c(true);
     state.set_flag_n(false);
     state.set_flag_h(false);
 }
 
 /// CCF - Complement Carry Flag
-fn ccf(state: &mut State) {
+fn ccf<M: Memory>(state: &mut GameBoy<M>) {
     state.set_flag_c(!state.flag_c());
     state.set_flag_n(false);
     state.set_flag_h(false);
 }
 
 /// INC (HL) - Increment value at memory location pointed to by HL
-fn inc_hl_indirect(state: &mut State) {
+fn inc_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = inc_byte(value, state);
@@ -1345,7 +1349,7 @@ fn inc_hl_indirect(state: &mut State) {
 }
 
 /// DEC (HL) - Decrement value at memory location pointed to by HL
-fn dec_hl_indirect(state: &mut State) {
+fn dec_hl_indirect<M: Memory>(state: &mut GameBoy<M>) {
     let addr = state.hl();
     let value = state.read(addr);
     let result = dec_byte(value, state);
@@ -1355,7 +1359,7 @@ fn dec_hl_indirect(state: &mut State) {
 /// Add 16-bit value to HL and update flags
 /// N flag is reset, H flag is set on carry from bit 11, C flag is set on carry from bit 15
 /// Z flag is not affected
-fn add_hl(value: u16, state: &mut State) {
+fn add_hl<M: Memory>(value: u16, state: &mut GameBoy<M>) {
     let hl = state.hl();
     let result = hl.wrapping_add(value);
 
@@ -1369,79 +1373,79 @@ fn add_hl(value: u16, state: &mut State) {
 }
 
 /// ADD HL,BC - Add BC to HL
-fn add_hl_bc(state: &mut State) {
+fn add_hl_bc<M: Memory>(state: &mut GameBoy<M>) {
     let bc = state.bc();
     add_hl(bc, state);
 }
 
 /// ADD HL,DE - Add DE to HL
-fn add_hl_de(state: &mut State) {
+fn add_hl_de<M: Memory>(state: &mut GameBoy<M>) {
     let de = state.de();
     add_hl(de, state);
 }
 
 /// ADD HL,HL - Add HL to HL (double HL)
-fn add_hl_hl(state: &mut State) {
+fn add_hl_hl<M: Memory>(state: &mut GameBoy<M>) {
     let hl = state.hl();
     add_hl(hl, state);
 }
 
 /// ADD HL,SP - Add SP to HL
-fn add_hl_sp(state: &mut State) {
+fn add_hl_sp<M: Memory>(state: &mut GameBoy<M>) {
     let sp = state.sp();
     add_hl(sp, state);
 }
 
 /// Increment the BC register pair by 1
-fn inc_bc(state: &mut State) {
+fn inc_bc<M: Memory>(state: &mut GameBoy<M>) {
     let value = state.bc().wrapping_add(1);
     state.set_bc(value);
 }
 
 /// Increment the DE register pair by 1
-fn inc_de(state: &mut State) {
+fn inc_de<M: Memory>(state: &mut GameBoy<M>) {
     let value = state.de().wrapping_add(1);
     state.set_de(value);
 }
 
 /// Increment the HL register pair by 1
-fn inc_hl(state: &mut State) {
+fn inc_hl<M: Memory>(state: &mut GameBoy<M>) {
     let value = state.hl().wrapping_add(1);
     state.set_hl(value);
 }
 
 /// Increment the SP register by 1
-fn inc_sp(state: &mut State) {
+fn inc_sp<M: Memory>(state: &mut GameBoy<M>) {
     let value = state.sp().wrapping_add(1);
     state.set_sp(value);
 }
 
 /// Decrement the BC register pair by 1
-fn dec_bc(state: &mut State) {
+fn dec_bc<M: Memory>(state: &mut GameBoy<M>) {
     let value = state.bc().wrapping_sub(1);
     state.set_bc(value);
 }
 
 /// Decrement the DE register pair by 1
-fn dec_de(state: &mut State) {
+fn dec_de<M: Memory>(state: &mut GameBoy<M>) {
     let value = state.de().wrapping_sub(1);
     state.set_de(value);
 }
 
 /// Decrement the HL register pair by 1
-fn dec_hl(state: &mut State) {
+fn dec_hl<M: Memory>(state: &mut GameBoy<M>) {
     let value = state.hl().wrapping_sub(1);
     state.set_hl(value);
 }
 
 /// Decrement the SP register by 1
-fn dec_sp(state: &mut State) {
+fn dec_sp<M: Memory>(state: &mut GameBoy<M>) {
     let value = state.sp().wrapping_sub(1);
     state.set_sp(value);
 }
 
 /// Execute a single CPU instruction.
-pub fn execute(state: &mut State) {
+pub fn execute<M: Memory>(state: &mut GameBoy<M>) {
     // Service any pending interrupts
     if service_interrupts(state) {
         // Interrupt was serviced, return early (PC now points to interrupt handler)
@@ -3189,7 +3193,7 @@ mod tests {
     // Tests for ADD A,r
     #[test]
     fn test_add_a_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x3A;
 
         add_a(0x05, &mut state);
@@ -3203,7 +3207,7 @@ mod tests {
 
     #[test]
     fn test_add_a_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
 
         add_a(0x00, &mut state);
@@ -3217,7 +3221,7 @@ mod tests {
 
     #[test]
     fn test_add_a_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
 
         add_a(0x02, &mut state);
@@ -3231,7 +3235,7 @@ mod tests {
 
     #[test]
     fn test_add_a_half_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x0F;
 
         add_a(0x01, &mut state);
@@ -3245,7 +3249,7 @@ mod tests {
 
     #[test]
     fn test_add_a_overflow_to_zero() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
 
         add_a(0x01, &mut state);
@@ -3259,7 +3263,7 @@ mod tests {
 
     #[test]
     fn test_add_a_both_carries() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
 
         add_a(0xFF, &mut state);
@@ -3273,7 +3277,7 @@ mod tests {
 
     #[test]
     fn test_add_a_no_half_carry_boundary() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x0E;
 
         add_a(0x01, &mut state);
@@ -3288,7 +3292,7 @@ mod tests {
     // Tests for ADC A,r
     #[test]
     fn test_adc_a_normal_no_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x3A;
         state.set_flag_c(false);
 
@@ -3303,7 +3307,7 @@ mod tests {
 
     #[test]
     fn test_adc_a_with_carry_flag() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x3A;
         state.set_flag_c(true);
 
@@ -3318,7 +3322,7 @@ mod tests {
 
     #[test]
     fn test_adc_a_carry_flag_causes_overflow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
         state.set_flag_c(true);
 
@@ -3333,7 +3337,7 @@ mod tests {
 
     #[test]
     fn test_adc_a_half_carry_with_carry_flag() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x0E;
         state.set_flag_c(true);
 
@@ -3348,7 +3352,7 @@ mod tests {
 
     #[test]
     fn test_adc_a_half_carry_from_value_and_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x0E;
         state.set_flag_c(true);
 
@@ -3363,7 +3367,7 @@ mod tests {
 
     #[test]
     fn test_adc_a_overflow_with_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFE;
         state.set_flag_c(true);
 
@@ -3378,7 +3382,7 @@ mod tests {
 
     #[test]
     fn test_adc_a_both_carries_with_carry_flag() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
         state.set_flag_c(true);
 
@@ -3394,7 +3398,7 @@ mod tests {
     // Tests for SUB A,r
     #[test]
     fn test_sub_a_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x3E;
 
         sub_a(0x0F, &mut state);
@@ -3408,7 +3412,7 @@ mod tests {
 
     #[test]
     fn test_sub_a_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x42;
 
         sub_a(0x42, &mut state);
@@ -3422,7 +3426,7 @@ mod tests {
 
     #[test]
     fn test_sub_a_underflow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
 
         sub_a(0x01, &mut state);
@@ -3436,7 +3440,7 @@ mod tests {
 
     #[test]
     fn test_sub_a_half_borrow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x10;
 
         sub_a(0x01, &mut state);
@@ -3450,7 +3454,7 @@ mod tests {
 
     #[test]
     fn test_sub_a_no_half_borrow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x0F;
 
         sub_a(0x01, &mut state);
@@ -3465,7 +3469,7 @@ mod tests {
     // Tests for SBC A,r
     #[test]
     fn test_sbc_a_normal_no_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x3E;
         state.set_flag_c(false);
 
@@ -3480,7 +3484,7 @@ mod tests {
 
     #[test]
     fn test_sbc_a_with_carry_flag() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x3E;
         state.set_flag_c(true);
 
@@ -3495,7 +3499,7 @@ mod tests {
 
     #[test]
     fn test_sbc_a_zero_result_with_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x01;
         state.set_flag_c(true);
 
@@ -3510,7 +3514,7 @@ mod tests {
 
     #[test]
     fn test_sbc_a_underflow_with_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
         state.set_flag_c(true);
 
@@ -3525,7 +3529,7 @@ mod tests {
 
     #[test]
     fn test_sbc_a_half_borrow_from_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x10;
         state.set_flag_c(true);
 
@@ -3541,7 +3545,7 @@ mod tests {
     // Tests for AND A,r
     #[test]
     fn test_and_a_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b11110000;
 
         and_a(0b10101010, &mut state);
@@ -3555,7 +3559,7 @@ mod tests {
 
     #[test]
     fn test_and_a_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b11110000;
 
         and_a(0b00001111, &mut state);
@@ -3569,7 +3573,7 @@ mod tests {
 
     #[test]
     fn test_and_a_with_self() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x5A;
 
         and_a(0x5A, &mut state);
@@ -3583,7 +3587,7 @@ mod tests {
 
     #[test]
     fn test_and_a_clears_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
         state.set_flag_c(true); // Set carry flag
         state.set_flag_n(true); // Set N flag
@@ -3599,7 +3603,7 @@ mod tests {
 
     #[test]
     fn test_and_a_with_zero() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
 
         and_a(0x00, &mut state);
@@ -3614,7 +3618,7 @@ mod tests {
     // Tests for XOR A,r
     #[test]
     fn test_xor_a_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b11110000;
 
         xor_a(0b10101010, &mut state);
@@ -3628,7 +3632,7 @@ mod tests {
 
     #[test]
     fn test_xor_a_with_self() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x5A;
 
         xor_a(0x5A, &mut state);
@@ -3642,7 +3646,7 @@ mod tests {
 
     #[test]
     fn test_xor_a_with_zero() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
 
         xor_a(0x00, &mut state);
@@ -3656,7 +3660,7 @@ mod tests {
 
     #[test]
     fn test_xor_a_clears_all_flags() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xAA;
         state.set_flag_c(true); // Set carry flag
         state.set_flag_n(true); // Set N flag
@@ -3673,7 +3677,7 @@ mod tests {
 
     #[test]
     fn test_xor_a_invert() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b10101010;
 
         xor_a(0xFF, &mut state); // XOR with 0xFF inverts all bits
@@ -3688,7 +3692,7 @@ mod tests {
     // Tests for OR A,r
     #[test]
     fn test_or_a_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b11110000;
 
         or_a(0b10101010, &mut state);
@@ -3702,7 +3706,7 @@ mod tests {
 
     #[test]
     fn test_or_a_with_self() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x5A;
 
         or_a(0x5A, &mut state);
@@ -3716,7 +3720,7 @@ mod tests {
 
     #[test]
     fn test_or_a_with_zero() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
 
         or_a(0x00, &mut state);
@@ -3730,7 +3734,7 @@ mod tests {
 
     #[test]
     fn test_or_a_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
 
         or_a(0x00, &mut state);
@@ -3744,7 +3748,7 @@ mod tests {
 
     #[test]
     fn test_or_a_clears_all_flags() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x0F;
         state.set_flag_c(true); // Set carry flag
         state.set_flag_n(true); // Set N flag
@@ -3762,7 +3766,7 @@ mod tests {
     // Tests for CP A,r (compare)
     #[test]
     fn test_cp_a_equal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x42;
 
         cp_a(0x42, &mut state);
@@ -3776,7 +3780,7 @@ mod tests {
 
     #[test]
     fn test_cp_a_greater_than() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x50;
 
         cp_a(0x30, &mut state);
@@ -3790,7 +3794,7 @@ mod tests {
 
     #[test]
     fn test_cp_a_less_than() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x30;
 
         cp_a(0x50, &mut state);
@@ -3804,7 +3808,7 @@ mod tests {
 
     #[test]
     fn test_cp_a_half_borrow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x3E;
 
         cp_a(0x0F, &mut state);
@@ -3818,7 +3822,7 @@ mod tests {
 
     #[test]
     fn test_cp_a_with_zero() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
 
         cp_a(0x00, &mut state);
@@ -3832,7 +3836,7 @@ mod tests {
 
     #[test]
     fn test_cp_a_underflow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
 
         cp_a(0x01, &mut state);
@@ -3847,7 +3851,7 @@ mod tests {
     // Tests for RET instructions
     #[test]
     fn test_ret_nz_returns_when_z_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.pc = 0x1234;
         state.set_flag_z(false);
@@ -3864,7 +3868,7 @@ mod tests {
 
     #[test]
     fn test_ret_nz_no_return_when_z_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.pc = 0x1234;
         state.set_flag_z(true);
@@ -3881,7 +3885,7 @@ mod tests {
 
     #[test]
     fn test_ret_z_returns_when_z_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.pc = 0x1234;
         state.set_flag_z(true);
@@ -3898,7 +3902,7 @@ mod tests {
 
     #[test]
     fn test_ret_z_no_return_when_z_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.pc = 0x1234;
         state.set_flag_z(false);
@@ -3915,7 +3919,7 @@ mod tests {
 
     #[test]
     fn test_ret_pops_correct_address() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x1000;
 
         // Test little-endian byte order
@@ -3930,7 +3934,7 @@ mod tests {
 
     #[test]
     fn test_ret_nc_returns_when_c_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.pc = 0x1234;
         state.set_flag_c(false);
@@ -3947,7 +3951,7 @@ mod tests {
 
     #[test]
     fn test_ret_nc_no_return_when_c_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.pc = 0x1234;
         state.set_flag_c(true);
@@ -3964,7 +3968,7 @@ mod tests {
 
     #[test]
     fn test_ret_c_returns_when_c_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.pc = 0x1234;
         state.set_flag_c(true);
@@ -3981,7 +3985,7 @@ mod tests {
 
     #[test]
     fn test_ret_c_no_return_when_c_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.pc = 0x1234;
         state.set_flag_c(false);
@@ -3998,7 +4002,7 @@ mod tests {
 
     #[test]
     fn test_reti_returns_and_enables_interrupts() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.pc = 0x1234;
         state.ime = false; // Interrupts disabled
@@ -4017,7 +4021,7 @@ mod tests {
     // Tests for POP BC
     #[test]
     fn test_pop_bc_basic() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.b = 0x00;
         state.c = 0x00;
@@ -4035,7 +4039,7 @@ mod tests {
 
     #[test]
     fn test_pop_bc_little_endian() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x2000;
 
         // Test that bytes are popped in correct order (little-endian)
@@ -4051,7 +4055,7 @@ mod tests {
 
     #[test]
     fn test_pop_bc_overwrites_previous_values() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x3000;
         state.b = 0xFF;
         state.c = 0xFF;
@@ -4068,7 +4072,7 @@ mod tests {
     // Tests for POP DE
     #[test]
     fn test_pop_de_basic() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.d = 0x00;
         state.e = 0x00;
@@ -4087,7 +4091,7 @@ mod tests {
     // Tests for JP (absolute jump)
     #[test]
     fn test_jp_sets_pc_to_address() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x100;
 
         // Write jump address 0x8000 at PC (little-endian)
@@ -4101,7 +4105,7 @@ mod tests {
 
     #[test]
     fn test_jp_little_endian() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x200;
 
         // Write jump address 0x1234 (little-endian)
@@ -4115,7 +4119,7 @@ mod tests {
 
     #[test]
     fn test_jp_nz_jumps_when_z_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x150;
         state.set_flag_z(false);
 
@@ -4129,7 +4133,7 @@ mod tests {
 
     #[test]
     fn test_jp_nz_no_jump_when_z_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x150;
         state.set_flag_z(true);
 
@@ -4144,7 +4148,7 @@ mod tests {
 
     #[test]
     fn test_jp_z_jumps_when_z_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x200;
         state.set_flag_z(true);
 
@@ -4158,7 +4162,7 @@ mod tests {
 
     #[test]
     fn test_jp_z_no_jump_when_z_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x200;
         state.set_flag_z(false);
 
@@ -4173,7 +4177,7 @@ mod tests {
 
     #[test]
     fn test_jp_nc_jumps_when_c_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x200;
         state.set_flag_c(false);
 
@@ -4187,7 +4191,7 @@ mod tests {
 
     #[test]
     fn test_jp_nc_no_jump_when_c_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x200;
         state.set_flag_c(true);
 
@@ -4202,7 +4206,7 @@ mod tests {
 
     #[test]
     fn test_jp_c_jumps_when_c_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x400;
         state.set_flag_c(true);
 
@@ -4216,7 +4220,7 @@ mod tests {
 
     #[test]
     fn test_jp_c_no_jump_when_c_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x400;
         state.set_flag_c(false);
 
@@ -4232,7 +4236,7 @@ mod tests {
     // Tests for CALL
     #[test]
     fn test_call_pushes_return_address_and_jumps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x100;
         state.sp = 0xFFFE;
 
@@ -4253,7 +4257,7 @@ mod tests {
 
     #[test]
     fn test_call_nz_calls_when_z_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x200;
         state.sp = 0xFF00;
         state.set_flag_z(false);
@@ -4272,7 +4276,7 @@ mod tests {
 
     #[test]
     fn test_call_nz_no_call_when_z_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x200;
         state.sp = 0xFF00;
         state.set_flag_z(true);
@@ -4289,7 +4293,7 @@ mod tests {
 
     #[test]
     fn test_call_z_calls_when_z_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x300;
         state.sp = 0xFF00;
         state.set_flag_z(true);
@@ -4308,7 +4312,7 @@ mod tests {
 
     #[test]
     fn test_call_z_no_call_when_z_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x300;
         state.sp = 0xFF00;
         state.set_flag_z(false);
@@ -4325,7 +4329,7 @@ mod tests {
 
     #[test]
     fn test_call_nc_calls_when_c_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x300;
         state.sp = 0xFF00;
         state.set_flag_c(false);
@@ -4344,7 +4348,7 @@ mod tests {
 
     #[test]
     fn test_call_nc_no_call_when_c_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x300;
         state.sp = 0xFF00;
         state.set_flag_c(true);
@@ -4361,7 +4365,7 @@ mod tests {
 
     #[test]
     fn test_call_c_calls_when_c_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x500;
         state.sp = 0xFF00;
         state.set_flag_c(true);
@@ -4380,7 +4384,7 @@ mod tests {
 
     #[test]
     fn test_call_c_no_call_when_c_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x500;
         state.sp = 0xFF00;
         state.set_flag_c(false);
@@ -4397,7 +4401,7 @@ mod tests {
 
     #[test]
     fn test_push_word_little_endian() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x2000;
 
         push_word(0xABCD, &mut state);
@@ -4413,7 +4417,7 @@ mod tests {
     // Tests for RST
     #[test]
     fn test_rst_00_pushes_pc_and_jumps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0xABCD;
         state.sp = 0xFFFE;
 
@@ -4430,7 +4434,7 @@ mod tests {
 
     #[test]
     fn test_rst_08_pushes_pc_and_jumps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1234;
         state.sp = 0xFFFE;
 
@@ -4447,7 +4451,7 @@ mod tests {
 
     #[test]
     fn test_rst_10_pushes_pc_and_jumps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x5678;
         state.sp = 0xFFFE;
 
@@ -4464,7 +4468,7 @@ mod tests {
 
     #[test]
     fn test_rst_18_pushes_pc_and_jumps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x9ABC;
         state.sp = 0xFFFE;
 
@@ -4482,7 +4486,7 @@ mod tests {
     // Tests for PUSH DE
     #[test]
     fn test_push_de() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x3000;
         state.d = 0xAB;
         state.e = 0xCD;
@@ -4499,7 +4503,7 @@ mod tests {
 
     #[test]
     fn test_push_bc() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x3000;
         state.b = 0x12;
         state.c = 0x34;
@@ -4517,7 +4521,7 @@ mod tests {
     // Tests for POP HL and PUSH HL
     #[test]
     fn test_pop_hl() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x2000;
         state.h = 0x00;
         state.l = 0x00;
@@ -4535,7 +4539,7 @@ mod tests {
 
     #[test]
     fn test_push_hl() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x4000;
         state.h = 0x56;
         state.l = 0x78;
@@ -4553,7 +4557,7 @@ mod tests {
     // Tests for LDH operations
     #[test]
     fn test_ldh_n_a() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x100;
         state.a = 0x42;
 
@@ -4569,7 +4573,7 @@ mod tests {
 
     #[test]
     fn test_ldh_c_a() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x99;
         state.c = 0x44;
 
@@ -4581,7 +4585,7 @@ mod tests {
 
     #[test]
     fn test_inc_byte_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x42;
 
         inc_a(&mut state);
@@ -4594,7 +4598,7 @@ mod tests {
 
     #[test]
     fn test_inc_byte_zero() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.b = 0xFF;
 
         inc_b(&mut state);
@@ -4607,7 +4611,7 @@ mod tests {
 
     #[test]
     fn test_inc_byte_half_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.c = 0x0F;
 
         inc_c(&mut state);
@@ -4620,7 +4624,7 @@ mod tests {
 
     #[test]
     fn test_inc_byte_all_registers() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.a = 0x00;
         inc_a(&mut state);
@@ -4647,7 +4651,7 @@ mod tests {
 
     #[test]
     fn test_inc_16bit_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_bc(0x1234);
 
         inc_bc(&mut state);
@@ -4657,7 +4661,7 @@ mod tests {
 
     #[test]
     fn test_inc_16bit_overflow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_de(0xFFFF);
 
         inc_de(&mut state);
@@ -4667,7 +4671,7 @@ mod tests {
 
     #[test]
     fn test_inc_16bit_all_registers() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.set_bc(0x0000);
         inc_bc(&mut state);
@@ -4685,7 +4689,7 @@ mod tests {
 
     #[test]
     fn test_dec_byte_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x42;
 
         dec_a(&mut state);
@@ -4698,7 +4702,7 @@ mod tests {
 
     #[test]
     fn test_dec_byte_zero() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.b = 0x01;
 
         dec_b(&mut state);
@@ -4711,7 +4715,7 @@ mod tests {
 
     #[test]
     fn test_dec_byte_half_borrow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.c = 0x10;
 
         dec_c(&mut state);
@@ -4724,7 +4728,7 @@ mod tests {
 
     #[test]
     fn test_dec_byte_underflow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.d = 0x00;
 
         dec_d(&mut state);
@@ -4737,7 +4741,7 @@ mod tests {
 
     #[test]
     fn test_dec_byte_all_registers() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.a = 0x02;
         dec_a(&mut state);
@@ -4764,7 +4768,7 @@ mod tests {
 
     #[test]
     fn test_dec_16bit_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_bc(0x1234);
 
         dec_bc(&mut state);
@@ -4774,7 +4778,7 @@ mod tests {
 
     #[test]
     fn test_dec_16bit_underflow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_de(0x0000);
 
         dec_de(&mut state);
@@ -4784,7 +4788,7 @@ mod tests {
 
     #[test]
     fn test_dec_16bit_all_registers() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.set_bc(0x0002);
         dec_bc(&mut state);
@@ -4802,7 +4806,7 @@ mod tests {
 
     #[test]
     fn test_rlc_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b0100_1010; // 0x4A
 
         rlc_a(&mut state);
@@ -4816,7 +4820,7 @@ mod tests {
 
     #[test]
     fn test_rlc_with_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.b = 0b1100_1010; // 0xCA
 
         rlc_b(&mut state);
@@ -4830,7 +4834,7 @@ mod tests {
 
     #[test]
     fn test_rlc_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.c = 0x00;
 
         rlc_c(&mut state);
@@ -4844,7 +4848,7 @@ mod tests {
 
     #[test]
     fn test_rlc_bit7_wraps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.d = 0x80; // 0b1000_0000
 
         rlc_d(&mut state);
@@ -4858,7 +4862,7 @@ mod tests {
 
     #[test]
     fn test_rlc_all_registers() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.a = 0x01;
         rlc_a(&mut state);
@@ -4891,7 +4895,7 @@ mod tests {
 
     #[test]
     fn test_rlc_all_bits() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
 
         rlc_a(&mut state);
@@ -4905,7 +4909,7 @@ mod tests {
 
     #[test]
     fn test_rlca_always_resets_z() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
 
         rlca(&mut state);
@@ -4919,7 +4923,7 @@ mod tests {
 
     #[test]
     fn test_rlca_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b1100_1010; // 0xCA
 
         rlca(&mut state);
@@ -4933,7 +4937,7 @@ mod tests {
 
     #[test]
     fn test_rlc_hl_indirect() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x1000);
         state.write(0x1000, 0b0100_1010); // 0x4A
 
@@ -4948,7 +4952,7 @@ mod tests {
 
     #[test]
     fn test_rrc_hl_indirect() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x2000);
         state.write(0x2000, 0b1010_0101); // 0xA5
 
@@ -4963,7 +4967,7 @@ mod tests {
 
     #[test]
     fn test_rrc_hl_indirect_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x3000);
         state.write(0x3000, 0x00);
 
@@ -4978,7 +4982,7 @@ mod tests {
 
     #[test]
     fn test_rl_hl_indirect_with_carry_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x4000);
         state.write(0x4000, 0b0100_1010); // 0x4A
         state.set_flag_c(false);
@@ -4994,7 +4998,7 @@ mod tests {
 
     #[test]
     fn test_rl_hl_indirect_with_carry_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x5000);
         state.write(0x5000, 0b0100_1010); // 0x4A
         state.set_flag_c(true);
@@ -5010,7 +5014,7 @@ mod tests {
 
     #[test]
     fn test_rl_hl_indirect_sets_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x6000);
         state.write(0x6000, 0b1010_1010); // 0xAA
         state.set_flag_c(false);
@@ -5026,7 +5030,7 @@ mod tests {
 
     #[test]
     fn test_rr_hl_indirect_with_carry_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x7000);
         state.write(0x7000, 0b1001_0100); // 0x94
         state.set_flag_c(false);
@@ -5042,7 +5046,7 @@ mod tests {
 
     #[test]
     fn test_rr_hl_indirect_with_carry_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x8000);
         state.write(0x8000, 0b1001_0100); // 0x94
         state.set_flag_c(true);
@@ -5058,7 +5062,7 @@ mod tests {
 
     #[test]
     fn test_rr_hl_indirect_sets_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x9000);
         state.write(0x9000, 0b0101_0101); // 0x55
         state.set_flag_c(false);
@@ -5074,7 +5078,7 @@ mod tests {
 
     #[test]
     fn test_rr_hl_indirect_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xA000);
         state.write(0xA000, 0x00);
         state.set_flag_c(false);
@@ -5090,7 +5094,7 @@ mod tests {
 
     #[test]
     fn test_sla_hl_indirect() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xB000);
         state.write(0xB000, 0b0100_1010); // 0x4A
 
@@ -5105,7 +5109,7 @@ mod tests {
 
     #[test]
     fn test_sla_hl_indirect_sets_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xC000);
         state.write(0xC000, 0b1010_1010); // 0xAA
 
@@ -5120,7 +5124,7 @@ mod tests {
 
     #[test]
     fn test_sla_hl_indirect_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xD000);
         state.write(0xD000, 0x00);
 
@@ -5135,7 +5139,7 @@ mod tests {
 
     #[test]
     fn test_sla_hl_indirect_overflow() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xE000);
         state.write(0xE000, 0b1000_0000); // 0x80
 
@@ -5150,7 +5154,7 @@ mod tests {
 
     #[test]
     fn test_sra_hl_indirect_positive() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF000);
         state.write(0xF000, 0b0100_1010); // 0x4A - positive number (bit 7 = 0)
 
@@ -5165,7 +5169,7 @@ mod tests {
 
     #[test]
     fn test_sra_hl_indirect_negative() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF100);
         state.write(0xF100, 0b1010_1010); // 0xAA - negative number (bit 7 = 1)
 
@@ -5180,7 +5184,7 @@ mod tests {
 
     #[test]
     fn test_sra_hl_indirect_sets_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF200);
         state.write(0xF200, 0b0101_0101); // 0x55
 
@@ -5195,7 +5199,7 @@ mod tests {
 
     #[test]
     fn test_sra_hl_indirect_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF300);
         state.write(0xF300, 0x00);
 
@@ -5210,7 +5214,7 @@ mod tests {
 
     #[test]
     fn test_sra_hl_indirect_preserves_sign_ff() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF400);
         state.write(0xF400, 0xFF); // All 1s
 
@@ -5225,7 +5229,7 @@ mod tests {
 
     #[test]
     fn test_swap_hl_indirect() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF500);
         state.write(0xF500, 0x12); // Upper nibble = 1, lower nibble = 2
 
@@ -5240,7 +5244,7 @@ mod tests {
 
     #[test]
     fn test_swap_hl_indirect_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF600);
         state.write(0xF600, 0x00);
 
@@ -5255,7 +5259,7 @@ mod tests {
 
     #[test]
     fn test_swap_hl_indirect_symmetric() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF700);
         state.write(0xF700, 0xAB); // Upper = A, lower = B
 
@@ -5270,7 +5274,7 @@ mod tests {
 
     #[test]
     fn test_swap_hl_indirect_double_swap() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF800);
         state.write(0xF800, 0x34);
 
@@ -5283,7 +5287,7 @@ mod tests {
 
     #[test]
     fn test_swap_hl_indirect_clears_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xF900);
         state.write(0xF900, 0x56);
         state.set_flag_c(true); // Set carry before swap
@@ -5296,7 +5300,7 @@ mod tests {
 
     #[test]
     fn test_srl_hl_indirect() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xFA00);
         state.write(0xFA00, 0b1001_0100); // 0x94
 
@@ -5311,7 +5315,7 @@ mod tests {
 
     #[test]
     fn test_srl_hl_indirect_clears_bit7() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xFB00);
         state.write(0xFB00, 0b1111_1110); // 0xFE - negative number
 
@@ -5326,7 +5330,7 @@ mod tests {
 
     #[test]
     fn test_srl_hl_indirect_sets_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xFC00);
         state.write(0xFC00, 0b0101_0101); // 0x55
 
@@ -5341,7 +5345,7 @@ mod tests {
 
     #[test]
     fn test_srl_hl_indirect_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xFD00);
         state.write(0xFD00, 0x01); // Only bit 0 set
 
@@ -5356,7 +5360,7 @@ mod tests {
 
     #[test]
     fn test_srl_hl_indirect_all_ones() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xFE00);
         state.write(0xFE00, 0xFF);
 
@@ -5371,7 +5375,7 @@ mod tests {
 
     #[test]
     fn test_bit_test_bit_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         let value = 0b0100_1010; // Bits 1, 3, 6 are set
 
         bit_test(value, 1, &mut state);
@@ -5382,7 +5386,7 @@ mod tests {
 
     #[test]
     fn test_bit_test_bit_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         let value = 0b0100_1010; // Bits 0, 2, 4, 5, 7 are clear
 
         bit_test(value, 0, &mut state);
@@ -5393,7 +5397,7 @@ mod tests {
 
     #[test]
     fn test_bit_test_all_bits() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         let value = 0b1010_1010; // Bits 1, 3, 5, 7 are set
 
         for bit in 0..8 {
@@ -5410,7 +5414,7 @@ mod tests {
 
     #[test]
     fn test_bit_test_preserves_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_flag_c(true);
         let value = 0b0000_0001;
 
@@ -5420,7 +5424,7 @@ mod tests {
 
     #[test]
     fn test_bit_test_bit_7() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         let value = 0x80; // Only bit 7 set
 
         bit_test(value, 7, &mut state);
@@ -5479,7 +5483,7 @@ mod tests {
 
     #[test]
     fn test_rrc_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b0100_1010; // 0x4A
 
         rrc_a(&mut state);
@@ -5493,7 +5497,7 @@ mod tests {
 
     #[test]
     fn test_rrc_with_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.b = 0b1100_1011; // 0xCB
 
         rrc_b(&mut state);
@@ -5507,7 +5511,7 @@ mod tests {
 
     #[test]
     fn test_rrc_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.c = 0x00;
 
         rrc_c(&mut state);
@@ -5521,7 +5525,7 @@ mod tests {
 
     #[test]
     fn test_rrc_bit0_wraps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.d = 0x01; // 0b0000_0001
 
         rrc_d(&mut state);
@@ -5535,7 +5539,7 @@ mod tests {
 
     #[test]
     fn test_rrc_all_registers() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.a = 0x80;
         rrc_a(&mut state);
@@ -5568,7 +5572,7 @@ mod tests {
 
     #[test]
     fn test_rrc_all_bits() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
 
         rrc_a(&mut state);
@@ -5582,7 +5586,7 @@ mod tests {
 
     #[test]
     fn test_rrca_always_resets_z() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
 
         rrca(&mut state);
@@ -5596,7 +5600,7 @@ mod tests {
 
     #[test]
     fn test_rrca_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b1100_1011; // 0xCB
 
         rrca(&mut state);
@@ -5610,7 +5614,7 @@ mod tests {
 
     #[test]
     fn test_rl_normal_carry_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b0100_1010; // 0x4A
         state.set_flag_c(false);
 
@@ -5625,7 +5629,7 @@ mod tests {
 
     #[test]
     fn test_rl_normal_carry_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.b = 0b0100_1010; // 0x4A
         state.set_flag_c(true);
 
@@ -5640,7 +5644,7 @@ mod tests {
 
     #[test]
     fn test_rl_with_carry_out() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.c = 0b1100_1010; // 0xCA
         state.set_flag_c(false);
 
@@ -5655,7 +5659,7 @@ mod tests {
 
     #[test]
     fn test_rl_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.d = 0x00;
         state.set_flag_c(false);
 
@@ -5670,7 +5674,7 @@ mod tests {
 
     #[test]
     fn test_rl_bit7_to_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.e = 0x80; // 0b1000_0000
         state.set_flag_c(true);
 
@@ -5685,7 +5689,7 @@ mod tests {
 
     #[test]
     fn test_rl_all_registers() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.a = 0x01;
         state.set_flag_c(false);
@@ -5725,7 +5729,7 @@ mod tests {
 
     #[test]
     fn test_rl_carry_propagation() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
         state.set_flag_c(true);
 
@@ -5740,7 +5744,7 @@ mod tests {
 
     #[test]
     fn test_rla_always_resets_z() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
         state.set_flag_c(false);
 
@@ -5755,7 +5759,7 @@ mod tests {
 
     #[test]
     fn test_rla_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b1100_1010; // 0xCA
         state.set_flag_c(true);
 
@@ -5770,7 +5774,7 @@ mod tests {
 
     #[test]
     fn test_rla_without_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b0100_1010; // 0x4A
         state.set_flag_c(false);
 
@@ -5785,7 +5789,7 @@ mod tests {
 
     #[test]
     fn test_jr_positive_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1000;
         state.write(0x1000, 0x10); // Jump forward by 16 bytes
 
@@ -5797,7 +5801,7 @@ mod tests {
 
     #[test]
     fn test_jr_negative_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1000;
         state.write(0x1000, 0xFE); // Jump backward by 2 bytes (-2 as signed i8)
 
@@ -5809,7 +5813,7 @@ mod tests {
 
     #[test]
     fn test_jr_zero_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1000;
         state.write(0x1000, 0x00); // No jump, just move to next instruction
 
@@ -5821,7 +5825,7 @@ mod tests {
 
     #[test]
     fn test_jr_max_positive_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1000;
         state.write(0x1000, 0x7F); // Jump forward by 127 bytes (max positive i8)
 
@@ -5833,7 +5837,7 @@ mod tests {
 
     #[test]
     fn test_jr_max_negative_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1000;
         state.write(0x1000, 0x80); // Jump backward by 128 bytes (min i8 = -128)
 
@@ -5845,7 +5849,7 @@ mod tests {
 
     #[test]
     fn test_jr_wrap_around() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0xFFFE;
         state.write(0xFFFE, 0x05); // Jump forward by 5 bytes
 
@@ -5857,7 +5861,7 @@ mod tests {
 
     #[test]
     fn test_jr_backward_loop() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1005;
         state.write(0x1005, 0xFE); // -2, creates infinite loop
 
@@ -5869,7 +5873,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_bc_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x1000);
         state.set_bc(0x0234);
 
@@ -5883,7 +5887,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_de_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x2000);
         state.set_de(0x0500);
 
@@ -5897,7 +5901,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_half_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x0FFF);
         state.set_bc(0x0001);
 
@@ -5911,7 +5915,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xFFFF);
         state.set_de(0x0001);
 
@@ -5925,7 +5929,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_both_carries() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0xFFFF);
         state.set_bc(0xFFFF);
 
@@ -5939,7 +5943,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_hl_double() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x1234);
 
         add_hl_hl(&mut state);
@@ -5952,7 +5956,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_sp() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x1000);
         state.set_sp(0x0200);
 
@@ -5966,7 +5970,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_z_flag_preserved() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x1000);
         state.set_bc(0x1000);
         state.set_flag_z(true); // Set Z flag
@@ -5980,7 +5984,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_half_carry_boundary() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x0800);
         state.set_de(0x0800);
 
@@ -5994,7 +5998,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_no_half_carry_just_below() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x07FF);
         state.set_bc(0x0800);
 
@@ -6008,7 +6012,7 @@ mod tests {
 
     #[test]
     fn test_add_hl_carry_boundary() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x8000);
         state.set_de(0x8000);
 
@@ -6022,7 +6026,7 @@ mod tests {
 
     #[test]
     fn test_rr_normal_carry_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b1001_0100; // 0x94
         state.set_flag_c(false);
 
@@ -6037,7 +6041,7 @@ mod tests {
 
     #[test]
     fn test_rr_normal_carry_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.b = 0b1001_0100; // 0x94
         state.set_flag_c(true);
 
@@ -6052,7 +6056,7 @@ mod tests {
 
     #[test]
     fn test_rr_with_carry_out() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.c = 0b1001_0101; // 0x95
         state.set_flag_c(false);
 
@@ -6067,7 +6071,7 @@ mod tests {
 
     #[test]
     fn test_rr_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.d = 0x00;
         state.set_flag_c(false);
 
@@ -6082,7 +6086,7 @@ mod tests {
 
     #[test]
     fn test_rr_bit0_to_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.e = 0x01; // 0b0000_0001
         state.set_flag_c(true);
 
@@ -6097,7 +6101,7 @@ mod tests {
 
     #[test]
     fn test_rr_all_registers() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
 
         state.a = 0x80;
         state.set_flag_c(false);
@@ -6137,7 +6141,7 @@ mod tests {
 
     #[test]
     fn test_rr_carry_propagation() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0xFF;
         state.set_flag_c(true);
 
@@ -6152,7 +6156,7 @@ mod tests {
 
     #[test]
     fn test_rra_always_resets_z() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
         state.set_flag_c(false);
 
@@ -6167,7 +6171,7 @@ mod tests {
 
     #[test]
     fn test_rra_normal() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b1001_0101; // 0x95
         state.set_flag_c(true);
 
@@ -6182,7 +6186,7 @@ mod tests {
 
     #[test]
     fn test_rra_without_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0b1001_0100; // 0x94
         state.set_flag_c(false);
 
@@ -6197,7 +6201,7 @@ mod tests {
 
     #[test]
     fn test_jr_nz_jumps_when_z_clear() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1000;
         state.write(0x1000, 0x10); // Jump forward by 16 bytes
         state.set_flag_z(false); // Z flag clear
@@ -6210,7 +6214,7 @@ mod tests {
 
     #[test]
     fn test_jr_nz_no_jump_when_z_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1000;
         state.write(0x1000, 0x10); // Jump forward by 16 bytes
         state.set_flag_z(true); // Z flag set
@@ -6223,7 +6227,7 @@ mod tests {
 
     #[test]
     fn test_jr_nz_negative_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1000;
         state.write(0x1000, 0xFE); // Jump backward by 2 bytes (-2)
         state.set_flag_z(false); // Z flag clear
@@ -6236,7 +6240,7 @@ mod tests {
 
     #[test]
     fn test_jr_nz_zero_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1000;
         state.write(0x1000, 0x00); // No offset
         state.set_flag_z(false); // Z flag clear
@@ -6249,7 +6253,7 @@ mod tests {
 
     #[test]
     fn test_daa_after_add_no_adjust() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x45; // BCD 45
         state.set_flag_n(false); // Addition
         state.set_flag_h(false);
@@ -6265,7 +6269,7 @@ mod tests {
 
     #[test]
     fn test_daa_after_add_lower_nibble() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x0F; // Lower nibble > 9
         state.set_flag_n(false); // Addition
         state.set_flag_h(false);
@@ -6281,7 +6285,7 @@ mod tests {
 
     #[test]
     fn test_daa_after_add_upper_nibble() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x9A; // Upper nibble needs adjustment
         state.set_flag_n(false); // Addition
         state.set_flag_h(false);
@@ -6297,7 +6301,7 @@ mod tests {
 
     #[test]
     fn test_daa_after_add_both_nibbles() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x9F; // Both nibbles need adjustment
         state.set_flag_n(false); // Addition
         state.set_flag_h(false);
@@ -6313,7 +6317,7 @@ mod tests {
 
     #[test]
     fn test_daa_after_add_with_half_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x12;
         state.set_flag_n(false); // Addition
         state.set_flag_h(true); // Half carry was set
@@ -6329,7 +6333,7 @@ mod tests {
 
     #[test]
     fn test_daa_after_add_with_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x12;
         state.set_flag_n(false); // Addition
         state.set_flag_h(false);
@@ -6345,7 +6349,7 @@ mod tests {
 
     #[test]
     fn test_daa_after_sub_no_adjust() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x45;
         state.set_flag_n(true); // Subtraction
         state.set_flag_h(false);
@@ -6361,7 +6365,7 @@ mod tests {
 
     #[test]
     fn test_daa_after_sub_with_half_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x50;
         state.set_flag_n(true); // Subtraction
         state.set_flag_h(true); // Half borrow
@@ -6377,7 +6381,7 @@ mod tests {
 
     #[test]
     fn test_daa_after_sub_with_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x70;
         state.set_flag_n(true); // Subtraction
         state.set_flag_h(false);
@@ -6393,7 +6397,7 @@ mod tests {
 
     #[test]
     fn test_daa_zero_result() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
         state.set_flag_n(false);
         state.set_flag_h(false);
@@ -6409,7 +6413,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_none() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x00); // No interrupts enabled
         state.write(IF, 0x00); // No interrupts flagged
 
@@ -6418,7 +6422,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_enabled_but_not_flagged() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x1F); // All interrupts enabled
         state.write(IF, 0x00); // No interrupts flagged
 
@@ -6427,7 +6431,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_flagged_but_not_enabled() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x00); // No interrupts enabled
         state.write(IF, 0x1F); // All interrupts flagged
 
@@ -6436,7 +6440,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_vblank() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x01); // V-Blank enabled (bit 0)
         state.write(IF, 0x01); // V-Blank flagged (bit 0)
 
@@ -6445,7 +6449,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_lcd_stat() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x02); // LCD STAT enabled (bit 1)
         state.write(IF, 0x02); // LCD STAT flagged (bit 1)
 
@@ -6454,7 +6458,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_timer() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x04); // Timer enabled (bit 2)
         state.write(IF, 0x04); // Timer flagged (bit 2)
 
@@ -6463,7 +6467,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_serial() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x08); // Serial enabled (bit 3)
         state.write(IF, 0x08); // Serial flagged (bit 3)
 
@@ -6472,7 +6476,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_joypad() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x10); // Joypad enabled (bit 4)
         state.write(IF, 0x10); // Joypad flagged (bit 4)
 
@@ -6481,7 +6485,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_multiple() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x1F); // All interrupts enabled
         state.write(IF, 0x03); // V-Blank and LCD STAT flagged
 
@@ -6490,7 +6494,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_partial_match() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0x05); // V-Blank and Timer enabled
         state.write(IF, 0x07); // V-Blank, LCD STAT, and Timer flagged
 
@@ -6499,7 +6503,7 @@ mod tests {
 
     #[test]
     fn test_has_pending_interrupt_ignores_upper_bits() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.write(IE, 0xFF); // All bits set
         state.write(IF, 0xE0); // Only upper bits set (not valid interrupts)
 
@@ -6508,7 +6512,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_ime_disabled() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false;
         state.write(IE, 0x1F); // All interrupts enabled
         state.write(IF, 0x1F); // All interrupts flagged
@@ -6523,7 +6527,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_no_pending() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x00); // No interrupts enabled
         state.write(IF, 0x1F); // All interrupts flagged
@@ -6538,7 +6542,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_vblank() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x01); // V-Blank enabled
         state.write(IF, 0x01); // V-Blank flagged
@@ -6558,7 +6562,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_lcd_stat() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x02); // LCD STAT enabled
         state.write(IF, 0x02); // LCD STAT flagged
@@ -6575,7 +6579,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_timer() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x04); // Timer enabled
         state.write(IF, 0x04); // Timer flagged
@@ -6592,7 +6596,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_serial() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x08); // Serial enabled
         state.write(IF, 0x08); // Serial flagged
@@ -6609,7 +6613,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_joypad() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x10); // Joypad enabled
         state.write(IF, 0x10); // Joypad flagged
@@ -6626,7 +6630,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_priority_vblank_highest() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x1F); // All interrupts enabled
         state.write(IF, 0x1F); // All interrupts flagged
@@ -6642,7 +6646,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_priority_lcd_stat_second() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x1F); // All interrupts enabled
         state.write(IF, 0x1E); // All except V-Blank flagged
@@ -6658,7 +6662,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_priority_joypad_lowest() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x10); // Only Joypad enabled
         state.write(IF, 0x1F); // All interrupts flagged
@@ -6674,7 +6678,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_partial_flags_cleared() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x05); // V-Blank and Timer enabled
         state.write(IF, 0x07); // V-Blank, LCD STAT, and Timer flagged
@@ -6690,7 +6694,7 @@ mod tests {
 
     #[test]
     fn test_service_interrupts_stack_push_correct_order() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.write(IE, 0x01);
         state.write(IF, 0x01);
@@ -6707,7 +6711,7 @@ mod tests {
     // Tests for RST 20h and RST 28h
     #[test]
     fn test_rst_20_pushes_pc_and_jumps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0xABCD;
         state.sp = 0xFFFE;
 
@@ -6724,7 +6728,7 @@ mod tests {
 
     #[test]
     fn test_rst_28_pushes_pc_and_jumps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1234;
         state.sp = 0xFFFE;
 
@@ -6742,7 +6746,7 @@ mod tests {
     // Tests for ADD SP,n
     #[test]
     fn test_add_sp_n_positive_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x1000;
         state.pc = 0x100;
         state.write(0x100, 0x10); // Positive offset: +16
@@ -6757,7 +6761,7 @@ mod tests {
 
     #[test]
     fn test_add_sp_n_negative_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x1000;
         state.pc = 0x100;
         state.write(0x100, 0xF0); // Negative offset: -16
@@ -6771,7 +6775,7 @@ mod tests {
 
     #[test]
     fn test_add_sp_n_half_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x000F;
         state.pc = 0x100;
         state.write(0x100, 0x01); // +1
@@ -6786,7 +6790,7 @@ mod tests {
 
     #[test]
     fn test_add_sp_n_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x00FF;
         state.pc = 0x100;
         state.write(0x100, 0x01); // +1
@@ -6802,7 +6806,7 @@ mod tests {
     // Tests for JP HL
     #[test]
     fn test_jp_hl_jumps_to_hl() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x100;
         state.set_hl(0x8000);
 
@@ -6813,7 +6817,7 @@ mod tests {
 
     #[test]
     fn test_jp_hl_different_values() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.set_hl(0x1234);
 
         jp_hl(&mut state);
@@ -6824,7 +6828,7 @@ mod tests {
     // Tests for LD (nn),A
     #[test]
     fn test_ld_nn_a() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x100;
         state.a = 0x42;
 
@@ -6841,7 +6845,7 @@ mod tests {
 
     #[test]
     fn test_ld_nn_a_different_address() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x200;
         state.a = 0xFF;
 
@@ -6857,7 +6861,7 @@ mod tests {
     // Tests for LDH A,(n) and LDH A,(C)
     #[test]
     fn test_ldh_a_n() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x100;
         state.a = 0x00;
 
@@ -6875,7 +6879,7 @@ mod tests {
 
     #[test]
     fn test_ldh_a_c() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
         state.c = 0x44;
 
@@ -6891,7 +6895,7 @@ mod tests {
     // Tests for POP AF
     #[test]
     fn test_pop_af_basic() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0xFFF0;
         state.a = 0x00;
         state.f = 0x00;
@@ -6909,7 +6913,7 @@ mod tests {
 
     #[test]
     fn test_pop_af_restores_flags() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x2000;
 
         // Setup stack with flags: Z=1, N=1, H=1, C=1 (0xF0)
@@ -6929,7 +6933,7 @@ mod tests {
     // Tests for HALT instruction
     #[test]
     fn test_halt_normal_with_ime_enabled() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.halt = false;
         state.halt_bug = false;
@@ -6942,7 +6946,7 @@ mod tests {
 
     #[test]
     fn test_halt_normal_with_ime_disabled_no_interrupt() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false;
         state.halt = false;
         state.halt_bug = false;
@@ -6958,7 +6962,7 @@ mod tests {
     fn test_halt_bug_triggered() {
         use crate::io::{IE, IF};
 
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false; // Interrupts disabled
         state.halt = false;
         state.halt_bug = false;
@@ -6977,7 +6981,7 @@ mod tests {
     fn test_halt_bug_with_multiple_pending_interrupts() {
         use crate::io::{IE, IF};
 
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false;
         state.halt = false;
         state.halt_bug = false;
@@ -6996,7 +7000,7 @@ mod tests {
     fn test_halt_no_bug_when_ime_enabled_with_pending_interrupt() {
         use crate::io::{IE, IF};
 
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true; // Interrupts enabled
         state.halt = false;
         state.halt_bug = false;
@@ -7015,7 +7019,7 @@ mod tests {
     fn test_halt_no_bug_when_interrupt_not_enabled() {
         use crate::io::{IE, IF};
 
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false;
         state.halt = false;
         state.halt_bug = false;
@@ -7034,7 +7038,7 @@ mod tests {
     fn test_halt_no_bug_when_interrupt_enabled_but_not_pending() {
         use crate::io::{IE, IF};
 
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false;
         state.halt = false;
         state.halt_bug = false;
@@ -7052,7 +7056,7 @@ mod tests {
     // Tests for handle_halt() function
     #[test]
     fn test_handle_halt_not_halted() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.halt = false;
         state.halt_bug = false;
 
@@ -7065,7 +7069,7 @@ mod tests {
 
     #[test]
     fn test_handle_halt_bug_triggered() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.halt = false;
         state.halt_bug = true;
         state.pc = 0x100;
@@ -7079,7 +7083,7 @@ mod tests {
 
     #[test]
     fn test_handle_halt_bug_with_wrapping() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.halt = false;
         state.halt_bug = true;
         state.pc = 0x0000;
@@ -7095,7 +7099,7 @@ mod tests {
     fn test_handle_halt_mode_with_interrupt() {
         use crate::io::{IE, IF};
 
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.halt = true;
         state.halt_bug = false;
 
@@ -7112,7 +7116,7 @@ mod tests {
 
     #[test]
     fn test_handle_halt_mode_without_interrupt() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.halt = true;
         state.halt_bug = false;
         // No pending interrupts
@@ -7128,7 +7132,7 @@ mod tests {
     fn test_handle_halt_bug_priority_over_halt_mode() {
         use crate::io::{IE, IF};
 
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.halt = true; // Both flags set
         state.halt_bug = true;
         state.pc = 0x200;
@@ -7150,7 +7154,7 @@ mod tests {
     fn test_handle_halt_mode_exit_with_ime_enabled() {
         use crate::io::{IE, IF};
 
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.halt = true;
         state.ime = true; // IME enabled
 
@@ -7169,7 +7173,7 @@ mod tests {
     fn test_handle_halt_mode_exit_with_ime_disabled() {
         use crate::io::{IE, IF};
 
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.halt = true;
         state.ime = false; // IME disabled
 
@@ -7187,7 +7191,7 @@ mod tests {
     // Tests for handle_delayed_ime() function
     #[test]
     fn test_handle_delayed_ime_no_delay() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.ei_delay = false;
         state.di_delay = false;
@@ -7202,7 +7206,7 @@ mod tests {
 
     #[test]
     fn test_handle_delayed_ime_di_applies_after_other_instruction() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.di_delay = true;
         state.last_opcode = 0x00; // Last instruction was NOT DI
@@ -7215,7 +7219,7 @@ mod tests {
 
     #[test]
     fn test_handle_delayed_ime_di_does_not_apply_after_di() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.di_delay = true;
         state.last_opcode = OPCODE_DI; // Last instruction WAS DI
@@ -7228,7 +7232,7 @@ mod tests {
 
     #[test]
     fn test_handle_delayed_ime_ei_applies_after_other_instruction() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false;
         state.ei_delay = true;
         state.last_opcode = 0x00; // Last instruction was NOT EI
@@ -7241,7 +7245,7 @@ mod tests {
 
     #[test]
     fn test_handle_delayed_ime_ei_does_not_apply_after_ei() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false;
         state.ei_delay = true;
         state.last_opcode = OPCODE_EI; // Last instruction WAS EI
@@ -7254,7 +7258,7 @@ mod tests {
 
     #[test]
     fn test_handle_delayed_ime_both_delays_set() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.di_delay = true;
         state.ei_delay = true; // Both set (unusual but possible in testing)
@@ -7270,7 +7274,7 @@ mod tests {
 
     #[test]
     fn test_handle_delayed_ime_di_after_multiple_instructions() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = true;
         state.di_delay = true;
         state.last_opcode = 0x3E; // LD A,n (random instruction)
@@ -7283,7 +7287,7 @@ mod tests {
 
     #[test]
     fn test_handle_delayed_ime_ei_after_reti() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false;
         state.ei_delay = true;
         state.last_opcode = 0xD9; // RETI (common pattern: EI; RETI)
@@ -7296,7 +7300,7 @@ mod tests {
 
     #[test]
     fn test_handle_delayed_ime_preserves_ime_when_no_delay() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.ime = false;
         state.ei_delay = false;
         state.di_delay = false;
@@ -7310,7 +7314,7 @@ mod tests {
     // Tests for PUSH AF
     #[test]
     fn test_push_af() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x3000;
         state.a = 0x42;
         state.f = 0xF0;
@@ -7328,7 +7332,7 @@ mod tests {
     // Tests for RST 30h and RST 38h
     #[test]
     fn test_rst_30_pushes_pc_and_jumps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x1234;
         state.sp = 0xFFFE;
 
@@ -7345,7 +7349,7 @@ mod tests {
 
     #[test]
     fn test_rst_38_pushes_pc_and_jumps() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0xABCD;
         state.sp = 0xFFFE;
 
@@ -7363,7 +7367,7 @@ mod tests {
     // Tests for LD HL,SP+n
     #[test]
     fn test_ld_hl_sp_n_positive_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x1000;
         state.pc = 0x100;
         state.write(0x100, 0x10); // Positive offset: +16
@@ -7378,7 +7382,7 @@ mod tests {
 
     #[test]
     fn test_ld_hl_sp_n_negative_offset() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x1000;
         state.pc = 0x100;
         state.write(0x100, 0xF0); // Negative offset: -16
@@ -7392,7 +7396,7 @@ mod tests {
 
     #[test]
     fn test_ld_hl_sp_n_half_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x000F;
         state.pc = 0x100;
         state.write(0x100, 0x01); // +1
@@ -7405,7 +7409,7 @@ mod tests {
 
     #[test]
     fn test_ld_hl_sp_n_carry() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.sp = 0x00FF;
         state.pc = 0x100;
         state.write(0x100, 0x01); // +1
@@ -7419,7 +7423,7 @@ mod tests {
     // Tests for LD A,(nn)
     #[test]
     fn test_ld_a_nn() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x100;
         state.a = 0x00;
 
@@ -7439,7 +7443,7 @@ mod tests {
 
     #[test]
     fn test_ld_a_nn_different_address() {
-        let mut state = State::new();
+        let mut state = GameBoy::<FlatMemory>::new();
         state.pc = 0x200;
         state.a = 0x00;
 
