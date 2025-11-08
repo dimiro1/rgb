@@ -80,6 +80,24 @@ fn add_a(value: u8, state: &mut State) {
     state.a = result;
 }
 
+/// Add an 8-bit value plus carry flag to register A and update flags accordingly
+/// Z: Set if result is zero
+/// N: Reset (addition operation)
+/// H: Set if carry from bit 3
+/// C: Set if carry from bit 7
+fn adc_a(value: u8, state: &mut State) {
+    let a = state.a;
+    let carry = if state.flag_c() { 1 } else { 0 };
+    let result = a.wrapping_add(value).wrapping_add(carry);
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(false);
+    state.set_flag_h((a & 0xF) + (value & 0xF) + carry > 0xF);
+    state.set_flag_c((a as u16) + (value as u16) + (carry as u16) > 0xFF);
+
+    state.a = result;
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1330,6 +1348,47 @@ pub fn execute(state: &mut State) {
             add_a(state.a, state);
             state.cycles += 4;
         }
+        0x88 => {
+            /* ADC A,B */
+            adc_a(state.b, state);
+            state.cycles += 4;
+        }
+        0x89 => {
+            /* ADC A,C */
+            adc_a(state.c, state);
+            state.cycles += 4;
+        }
+        0x8A => {
+            /* ADC A,D */
+            adc_a(state.d, state);
+            state.cycles += 4;
+        }
+        0x8B => {
+            /* ADC A,E */
+            adc_a(state.e, state);
+            state.cycles += 4;
+        }
+        0x8C => {
+            /* ADC A,H */
+            adc_a(state.h, state);
+            state.cycles += 4;
+        }
+        0x8D => {
+            /* ADC A,L */
+            adc_a(state.l, state);
+            state.cycles += 4;
+        }
+        0x8E => {
+            /* ADC A,(HL) */
+            let value = state.read(state.hl());
+            adc_a(value, state);
+            state.cycles += 8;
+        }
+        0x8F => {
+            /* ADC A,A */
+            adc_a(state.a, state);
+            state.cycles += 4;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -1437,6 +1496,112 @@ mod tests {
         assert!(!state.flag_n());
         assert!(!state.flag_h()); // No half carry
         assert!(!state.flag_c());
+    }
+
+    // Tests for ADC A,r
+    #[test]
+    fn test_adc_a_normal_no_carry() {
+        let mut state = State::new();
+        state.a = 0x3A;
+        state.set_flag_c(false);
+
+        adc_a(0x05, &mut state);
+
+        assert_eq!(state.a, 0x3F);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_adc_a_with_carry_flag() {
+        let mut state = State::new();
+        state.a = 0x3A;
+        state.set_flag_c(true);
+
+        adc_a(0x05, &mut state);
+
+        assert_eq!(state.a, 0x40); // 0x3A + 0x05 + 1 = 0x40
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // 0xA + 0x5 + 1 = 0x10 > 0xF (half carry)
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_adc_a_carry_flag_causes_overflow() {
+        let mut state = State::new();
+        state.a = 0xFF;
+        state.set_flag_c(true);
+
+        adc_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0x00); // 0xFF + 0 + 1 = 0x00 (overflow)
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry
+        assert!(state.flag_c()); // Carry
+    }
+
+    #[test]
+    fn test_adc_a_half_carry_with_carry_flag() {
+        let mut state = State::new();
+        state.a = 0x0E;
+        state.set_flag_c(true);
+
+        adc_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0x0F); // 0x0E + 0 + 1 = 0x0F
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h()); // No half carry
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_adc_a_half_carry_from_value_and_carry() {
+        let mut state = State::new();
+        state.a = 0x0E;
+        state.set_flag_c(true);
+
+        adc_a(0x01, &mut state);
+
+        assert_eq!(state.a, 0x10); // 0x0E + 0x01 + 1 = 0x10
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_adc_a_overflow_with_carry() {
+        let mut state = State::new();
+        state.a = 0xFE;
+        state.set_flag_c(true);
+
+        adc_a(0x01, &mut state);
+
+        assert_eq!(state.a, 0x00); // 0xFE + 0x01 + 1 = 0x00
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry
+        assert!(state.flag_c()); // Carry
+    }
+
+    #[test]
+    fn test_adc_a_both_carries_with_carry_flag() {
+        let mut state = State::new();
+        state.a = 0xFF;
+        state.set_flag_c(true);
+
+        adc_a(0xFF, &mut state);
+
+        assert_eq!(state.a, 0xFF); // 0xFF + 0xFF + 1 = 0xFF (with overflow)
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry
+        assert!(state.flag_c()); // Carry
     }
 
     #[test]
