@@ -63,6 +63,23 @@ fn service_interrupts(state: &mut State) -> bool {
     true
 }
 
+/// Add an 8-bit value to register A and update flags accordingly
+/// Z: Set if result is zero
+/// N: Reset (addition operation)
+/// H: Set if carry from bit 3
+/// C: Set if carry from bit 7
+fn add_a(value: u8, state: &mut State) {
+    let a = state.a;
+    let result = a.wrapping_add(value);
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(false);
+    state.set_flag_h((a & 0xF) + (value & 0xF) > 0xF);
+    state.set_flag_c((a as u16) + (value as u16) > 0xFF);
+
+    state.a = result;
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1272,6 +1289,47 @@ pub fn execute(state: &mut State) {
             // No-op, but still takes cycles
             state.cycles += 4;
         }
+        0x80 => {
+            /* ADD A,B */
+            add_a(state.b, state);
+            state.cycles += 4;
+        }
+        0x81 => {
+            /* ADD A,C */
+            add_a(state.c, state);
+            state.cycles += 4;
+        }
+        0x82 => {
+            /* ADD A,D */
+            add_a(state.d, state);
+            state.cycles += 4;
+        }
+        0x83 => {
+            /* ADD A,E */
+            add_a(state.e, state);
+            state.cycles += 4;
+        }
+        0x84 => {
+            /* ADD A,H */
+            add_a(state.h, state);
+            state.cycles += 4;
+        }
+        0x85 => {
+            /* ADD A,L */
+            add_a(state.l, state);
+            state.cycles += 4;
+        }
+        0x86 => {
+            /* ADD A,(HL) */
+            let value = state.read(state.hl());
+            add_a(value, state);
+            state.cycles += 8;
+        }
+        0x87 => {
+            /* ADD A,A */
+            add_a(state.a, state);
+            state.cycles += 4;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -1281,6 +1339,105 @@ pub fn execute(state: &mut State) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Tests for ADD A,r
+    #[test]
+    fn test_add_a_normal() {
+        let mut state = State::new();
+        state.a = 0x3A;
+
+        add_a(0x05, &mut state);
+
+        assert_eq!(state.a, 0x3F);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_add_a_zero_result() {
+        let mut state = State::new();
+        state.a = 0x00;
+
+        add_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0x00);
+        assert!(state.flag_z()); // Result is zero
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_add_a_carry() {
+        let mut state = State::new();
+        state.a = 0xFF;
+
+        add_a(0x02, &mut state);
+
+        assert_eq!(state.a, 0x01);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Carry from bit 3
+        assert!(state.flag_c()); // Carry from bit 7
+    }
+
+    #[test]
+    fn test_add_a_half_carry() {
+        let mut state = State::new();
+        state.a = 0x0F;
+
+        add_a(0x01, &mut state);
+
+        assert_eq!(state.a, 0x10);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry from bit 3
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_add_a_overflow_to_zero() {
+        let mut state = State::new();
+        state.a = 0xFF;
+
+        add_a(0x01, &mut state);
+
+        assert_eq!(state.a, 0x00);
+        assert!(state.flag_z()); // Result is zero
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry
+        assert!(state.flag_c()); // Carry
+    }
+
+    #[test]
+    fn test_add_a_both_carries() {
+        let mut state = State::new();
+        state.a = 0xFF;
+
+        add_a(0xFF, &mut state);
+
+        assert_eq!(state.a, 0xFE);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // Half carry
+        assert!(state.flag_c()); // Carry
+    }
+
+    #[test]
+    fn test_add_a_no_half_carry_boundary() {
+        let mut state = State::new();
+        state.a = 0x0E;
+
+        add_a(0x01, &mut state);
+
+        assert_eq!(state.a, 0x0F);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h()); // No half carry
+        assert!(!state.flag_c());
+    }
 
     #[test]
     fn test_inc_8bit_normal() {
