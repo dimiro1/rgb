@@ -224,6 +224,13 @@ pub fn ret_nz(state: &mut State) {
     }
 }
 
+/// Return from subroutine if C flag is clear (NC)
+pub fn ret_nc(state: &mut State) {
+    if !state.flag_c() {
+        ret(state);
+    }
+}
+
 /// Pop 16-bit value from stack into BC register pair
 pub fn pop_bc(state: &mut State) {
     let value = pop_16bit(state);
@@ -1874,6 +1881,12 @@ pub fn execute(state: &mut State) {
             rst_08(state);
             state.cycles += 16;
         }
+        0xD0 => {
+            /* RET NC */
+            ret_nc(state);
+            // Conditional return: 8 cycles if not taken, 20 cycles if taken
+            state.cycles += if !state.flag_c() { 20 } else { 8 };
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -2590,6 +2603,40 @@ mod tests {
 
         assert_eq!(state.pc, 0x1234);
         assert_eq!(state.sp, 0x1002);
+    }
+
+    #[test]
+    fn test_ret_nc_returns_when_c_clear() {
+        let mut state = State::new();
+        state.sp = 0xFFF0;
+        state.pc = 0x1234;
+        state.set_flag_c(false);
+
+        // Setup stack with return address 0xABCD
+        state.write(0xFFF0, 0xCD); // Low byte
+        state.write(0xFFF1, 0xAB); // High byte
+
+        ret_nc(&mut state);
+
+        assert_eq!(state.pc, 0xABCD); // PC set to return address
+        assert_eq!(state.sp, 0xFFF2); // SP incremented by 2
+    }
+
+    #[test]
+    fn test_ret_nc_no_return_when_c_set() {
+        let mut state = State::new();
+        state.sp = 0xFFF0;
+        state.pc = 0x1234;
+        state.set_flag_c(true);
+
+        // Setup stack with return address 0xABCD
+        state.write(0xFFF0, 0xCD); // Low byte
+        state.write(0xFFF1, 0xAB); // High byte
+
+        ret_nc(&mut state);
+
+        assert_eq!(state.pc, 0x1234); // PC unchanged
+        assert_eq!(state.sp, 0xFFF0); // SP unchanged
     }
 
     // Tests for POP BC
