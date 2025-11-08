@@ -1461,8 +1461,6 @@ pub fn execute(state: &mut State) {
     // Track cycles before instruction execution
     let cycles_before = state.cycles;
 
-    // TODO: This is not fully correct, in fact the read function must take into consideration the
-    // current emomory bank and other detalis.
     let op = read_immediate_byte(state);
     state.last_opcode = op; // Store for delayed interrupt handling
 
