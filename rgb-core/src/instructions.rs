@@ -198,6 +198,27 @@ fn cp_a(value: u8, state: &mut State) {
     // Note: A register is NOT modified (that's the difference from SUB)
 }
 
+/// Return from subroutine - pop PC from stack
+fn ret(state: &mut State) {
+    // Pop low byte
+    let low = state.read(state.sp);
+    state.sp = state.sp.wrapping_add(1);
+
+    // Pop high byte
+    let high = state.read(state.sp);
+    state.sp = state.sp.wrapping_add(1);
+
+    // Set PC to popped address (little-endian)
+    state.pc = ((high as u16) << 8) | (low as u16);
+}
+
+/// Return from subroutine if Z flag is clear (NZ)
+pub fn ret_nz(state: &mut State) {
+    if !state.flag_z() {
+        ret(state);
+    }
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1735,6 +1756,12 @@ pub fn execute(state: &mut State) {
             cp_a(state.a, state);
             state.cycles += 4;
         }
+        0xC0 => {
+            /* RET NZ */
+            ret_nz(state);
+            // Conditional return: 8 cycles if not taken, 20 cycles if taken
+            state.cycles += if !state.flag_z() { 20 } else { 8 };
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -2401,6 +2428,56 @@ mod tests {
         assert!(state.flag_n());
         assert!(state.flag_h()); // Half borrow
         assert!(state.flag_c()); // Borrow
+    }
+
+    // Tests for RET instructions
+    #[test]
+    fn test_ret_nz_returns_when_z_clear() {
+        let mut state = State::new();
+        state.sp = 0xFFF0;
+        state.pc = 0x1234;
+        state.set_flag_z(false);
+
+        // Setup stack with return address 0xABCD
+        state.write(0xFFF0, 0xCD); // Low byte
+        state.write(0xFFF1, 0xAB); // High byte
+
+        ret_nz(&mut state);
+
+        assert_eq!(state.pc, 0xABCD); // PC set to return address
+        assert_eq!(state.sp, 0xFFF2); // SP incremented by 2
+    }
+
+    #[test]
+    fn test_ret_nz_no_return_when_z_set() {
+        let mut state = State::new();
+        state.sp = 0xFFF0;
+        state.pc = 0x1234;
+        state.set_flag_z(true);
+
+        // Setup stack with return address 0xABCD
+        state.write(0xFFF0, 0xCD); // Low byte
+        state.write(0xFFF1, 0xAB); // High byte
+
+        ret_nz(&mut state);
+
+        assert_eq!(state.pc, 0x1234); // PC unchanged
+        assert_eq!(state.sp, 0xFFF0); // SP unchanged
+    }
+
+    #[test]
+    fn test_ret_pops_correct_address() {
+        let mut state = State::new();
+        state.sp = 0x1000;
+
+        // Test little-endian byte order
+        state.write(0x1000, 0x34); // Low byte
+        state.write(0x1001, 0x12); // High byte
+
+        ret(&mut state);
+
+        assert_eq!(state.pc, 0x1234);
+        assert_eq!(state.sp, 0x1002);
     }
 
     #[test]
