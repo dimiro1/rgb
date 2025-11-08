@@ -797,6 +797,30 @@ fn rlc_hl_indirect(state: &mut State) {
     state.write(addr, result);
 }
 
+/// Rotate value at (HL) right circular
+fn rrc_hl_indirect(state: &mut State) {
+    let addr = state.hl();
+    let value = state.read(addr);
+    let result = rrc_byte(value, state);
+    state.write(addr, result);
+}
+
+/// Rotate left through carry - value at (HL)
+fn rl_hl_indirect(state: &mut State) {
+    let addr = state.hl();
+    let value = state.read(addr);
+    let result = rl_byte(value, state);
+    state.write(addr, result);
+}
+
+/// Rotate right through carry - value at (HL)
+fn rr_hl_indirect(state: &mut State) {
+    let addr = state.hl();
+    let value = state.read(addr);
+    let result = rr_byte(value, state);
+    state.write(addr, result);
+}
+
 /// RLCA - Rotate A left circular (always resets Z flag)
 fn rlca(state: &mut State) {
     state.a = rlc_byte(state.a, state);
@@ -967,6 +991,177 @@ fn rr_l(state: &mut State) {
 fn rra(state: &mut State) {
     state.a = rr_byte(state.a, state);
     state.set_flag_z(false); // RRA always resets Z flag
+}
+
+/// SLA - Shift Left Arithmetic
+/// Shifts value left, bit 7 goes to carry, bit 0 becomes 0
+fn sla_byte(value: u8, state: &mut State) -> u8 {
+    let bit7 = (value & 0x80) != 0;
+    let result = value << 1;
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(false);
+    state.set_flag_h(false);
+    state.set_flag_c(bit7);
+
+    result
+}
+
+/// Shift register A left arithmetic
+fn sla_a(state: &mut State) {
+    state.a = sla_byte(state.a, state);
+}
+
+/// Shift register B left arithmetic
+fn sla_b(state: &mut State) {
+    state.b = sla_byte(state.b, state);
+}
+
+/// Shift register C left arithmetic
+fn sla_c(state: &mut State) {
+    state.c = sla_byte(state.c, state);
+}
+
+/// Shift register D left arithmetic
+fn sla_d(state: &mut State) {
+    state.d = sla_byte(state.d, state);
+}
+
+/// Shift register E left arithmetic
+fn sla_e(state: &mut State) {
+    state.e = sla_byte(state.e, state);
+}
+
+/// Shift register H left arithmetic
+fn sla_h(state: &mut State) {
+    state.h = sla_byte(state.h, state);
+}
+
+/// Shift register L left arithmetic
+fn sla_l(state: &mut State) {
+    state.l = sla_byte(state.l, state);
+}
+
+/// Shift value at (HL) left arithmetic
+fn sla_hl_indirect(state: &mut State) {
+    let addr = state.hl();
+    let value = state.read(addr);
+    let result = sla_byte(value, state);
+    state.write(addr, result);
+}
+
+/// SRA - Shift Right Arithmetic
+/// Shifts value right, bit 0 goes to carry, bit 7 stays the same (preserves sign)
+fn sra_byte(value: u8, state: &mut State) -> u8 {
+    let bit0 = (value & 0x01) != 0;
+    let bit7 = value & 0x80; // Preserve the sign bit
+    let result = (value >> 1) | bit7;
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(false);
+    state.set_flag_h(false);
+    state.set_flag_c(bit0);
+
+    result
+}
+
+/// Shift register A right arithmetic
+fn sra_a(state: &mut State) {
+    state.a = sra_byte(state.a, state);
+}
+
+/// Shift register B right arithmetic
+fn sra_b(state: &mut State) {
+    state.b = sra_byte(state.b, state);
+}
+
+/// Shift register C right arithmetic
+fn sra_c(state: &mut State) {
+    state.c = sra_byte(state.c, state);
+}
+
+/// Shift register D right arithmetic
+fn sra_d(state: &mut State) {
+    state.d = sra_byte(state.d, state);
+}
+
+/// Shift register E right arithmetic
+fn sra_e(state: &mut State) {
+    state.e = sra_byte(state.e, state);
+}
+
+/// Shift register H right arithmetic
+fn sra_h(state: &mut State) {
+    state.h = sra_byte(state.h, state);
+}
+
+/// Shift register L right arithmetic
+fn sra_l(state: &mut State) {
+    state.l = sra_byte(state.l, state);
+}
+
+/// Shift value at (HL) right arithmetic
+fn sra_hl_indirect(state: &mut State) {
+    let addr = state.hl();
+    let value = state.read(addr);
+    let result = sra_byte(value, state);
+    state.write(addr, result);
+}
+
+/// SWAP - Swap upper and lower nibbles
+/// Exchanges the upper 4 bits with the lower 4 bits
+fn swap_byte(value: u8, state: &mut State) -> u8 {
+    let result = ((value & 0x0F) << 4) | ((value & 0xF0) >> 4);
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(false);
+    state.set_flag_h(false);
+    state.set_flag_c(false);
+
+    result
+}
+
+/// Swap register A nibbles
+fn swap_a(state: &mut State) {
+    state.a = swap_byte(state.a, state);
+}
+
+/// Swap register B nibbles
+fn swap_b(state: &mut State) {
+    state.b = swap_byte(state.b, state);
+}
+
+/// Swap register C nibbles
+fn swap_c(state: &mut State) {
+    state.c = swap_byte(state.c, state);
+}
+
+/// Swap register D nibbles
+fn swap_d(state: &mut State) {
+    state.d = swap_byte(state.d, state);
+}
+
+/// Swap register E nibbles
+fn swap_e(state: &mut State) {
+    state.e = swap_byte(state.e, state);
+}
+
+/// Swap register H nibbles
+fn swap_h(state: &mut State) {
+    state.h = swap_byte(state.h, state);
+}
+
+/// Swap register L nibbles
+fn swap_l(state: &mut State) {
+    state.l = swap_byte(state.l, state);
+}
+
+/// Swap value at (HL) nibbles
+fn swap_hl_indirect(state: &mut State) {
+    let addr = state.hl();
+    let value = state.read(addr);
+    let result = swap_byte(value, state);
+    state.write(addr, result);
 }
 
 /// JR - Jump relative (unconditional)
@@ -2264,6 +2459,246 @@ pub fn execute(state: &mut State) {
                 0x07 => {
                     /* RLC A */
                     rlc_a(state);
+                    state.cycles += 8;
+                }
+                0x08 => {
+                    /* RRC B */
+                    rrc_b(state);
+                    state.cycles += 8;
+                }
+                0x09 => {
+                    /* RRC C */
+                    rrc_c(state);
+                    state.cycles += 8;
+                }
+                0x0A => {
+                    /* RRC D */
+                    rrc_d(state);
+                    state.cycles += 8;
+                }
+                0x0B => {
+                    /* RRC E */
+                    rrc_e(state);
+                    state.cycles += 8;
+                }
+                0x0C => {
+                    /* RRC H */
+                    rrc_h(state);
+                    state.cycles += 8;
+                }
+                0x0D => {
+                    /* RRC L */
+                    rrc_l(state);
+                    state.cycles += 8;
+                }
+                0x0E => {
+                    /* RRC (HL) */
+                    rrc_hl_indirect(state);
+                    state.cycles += 16;
+                }
+                0x0F => {
+                    /* RRC A */
+                    rrc_a(state);
+                    state.cycles += 8;
+                }
+                0x10 => {
+                    /* RL B */
+                    rl_b(state);
+                    state.cycles += 8;
+                }
+                0x11 => {
+                    /* RL C */
+                    rl_c(state);
+                    state.cycles += 8;
+                }
+                0x12 => {
+                    /* RL D */
+                    rl_d(state);
+                    state.cycles += 8;
+                }
+                0x13 => {
+                    /* RL E */
+                    rl_e(state);
+                    state.cycles += 8;
+                }
+                0x14 => {
+                    /* RL H */
+                    rl_h(state);
+                    state.cycles += 8;
+                }
+                0x15 => {
+                    /* RL L */
+                    rl_l(state);
+                    state.cycles += 8;
+                }
+                0x16 => {
+                    /* RL (HL) */
+                    rl_hl_indirect(state);
+                    state.cycles += 16;
+                }
+                0x17 => {
+                    /* RL A */
+                    rl_a(state);
+                    state.cycles += 8;
+                }
+                0x18 => {
+                    /* RR B */
+                    rr_b(state);
+                    state.cycles += 8;
+                }
+                0x19 => {
+                    /* RR C */
+                    rr_c(state);
+                    state.cycles += 8;
+                }
+                0x1A => {
+                    /* RR D */
+                    rr_d(state);
+                    state.cycles += 8;
+                }
+                0x1B => {
+                    /* RR E */
+                    rr_e(state);
+                    state.cycles += 8;
+                }
+                0x1C => {
+                    /* RR H */
+                    rr_h(state);
+                    state.cycles += 8;
+                }
+                0x1D => {
+                    /* RR L */
+                    rr_l(state);
+                    state.cycles += 8;
+                }
+                0x1E => {
+                    /* RR (HL) */
+                    rr_hl_indirect(state);
+                    state.cycles += 16;
+                }
+                0x1F => {
+                    /* RR A */
+                    rr_a(state);
+                    state.cycles += 8;
+                }
+                0x20 => {
+                    /* SLA B */
+                    sla_b(state);
+                    state.cycles += 8;
+                }
+                0x21 => {
+                    /* SLA C */
+                    sla_c(state);
+                    state.cycles += 8;
+                }
+                0x22 => {
+                    /* SLA D */
+                    sla_d(state);
+                    state.cycles += 8;
+                }
+                0x23 => {
+                    /* SLA E */
+                    sla_e(state);
+                    state.cycles += 8;
+                }
+                0x24 => {
+                    /* SLA H */
+                    sla_h(state);
+                    state.cycles += 8;
+                }
+                0x25 => {
+                    /* SLA L */
+                    sla_l(state);
+                    state.cycles += 8;
+                }
+                0x26 => {
+                    /* SLA (HL) */
+                    sla_hl_indirect(state);
+                    state.cycles += 16;
+                }
+                0x27 => {
+                    /* SLA A */
+                    sla_a(state);
+                    state.cycles += 8;
+                }
+                0x28 => {
+                    /* SRA B */
+                    sra_b(state);
+                    state.cycles += 8;
+                }
+                0x29 => {
+                    /* SRA C */
+                    sra_c(state);
+                    state.cycles += 8;
+                }
+                0x2A => {
+                    /* SRA D */
+                    sra_d(state);
+                    state.cycles += 8;
+                }
+                0x2B => {
+                    /* SRA E */
+                    sra_e(state);
+                    state.cycles += 8;
+                }
+                0x2C => {
+                    /* SRA H */
+                    sra_h(state);
+                    state.cycles += 8;
+                }
+                0x2D => {
+                    /* SRA L */
+                    sra_l(state);
+                    state.cycles += 8;
+                }
+                0x2E => {
+                    /* SRA (HL) */
+                    sra_hl_indirect(state);
+                    state.cycles += 16;
+                }
+                0x2F => {
+                    /* SRA A */
+                    sra_a(state);
+                    state.cycles += 8;
+                }
+                0x30 => {
+                    /* SWAP B */
+                    swap_b(state);
+                    state.cycles += 8;
+                }
+                0x31 => {
+                    /* SWAP C */
+                    swap_c(state);
+                    state.cycles += 8;
+                }
+                0x32 => {
+                    /* SWAP D */
+                    swap_d(state);
+                    state.cycles += 8;
+                }
+                0x33 => {
+                    /* SWAP E */
+                    swap_e(state);
+                    state.cycles += 8;
+                }
+                0x34 => {
+                    /* SWAP H */
+                    swap_h(state);
+                    state.cycles += 8;
+                }
+                0x35 => {
+                    /* SWAP L */
+                    swap_l(state);
+                    state.cycles += 8;
+                }
+                0x36 => {
+                    /* SWAP (HL) */
+                    swap_hl_indirect(state);
+                    state.cycles += 16;
+                }
+                0x37 => {
+                    /* SWAP A */
+                    swap_a(state);
                     state.cycles += 8;
                 }
                 _ => {
@@ -4284,6 +4719,369 @@ mod tests {
         assert!(!state.flag_n());
         assert!(!state.flag_h());
         assert!(state.flag_c()); // Bit 7 was 1
+    }
+
+    #[test]
+    fn test_rlc_hl_indirect() {
+        let mut state = State::new();
+        state.set_hl(0x1000);
+        state.write(0x1000, 0b0100_1010); // 0x4A
+
+        rlc_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0x1000), 0b1001_0100); // 0x94
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 7 was 0
+    }
+
+    #[test]
+    fn test_rrc_hl_indirect() {
+        let mut state = State::new();
+        state.set_hl(0x2000);
+        state.write(0x2000, 0b1010_0101); // 0xA5
+
+        rrc_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0x2000), 0b1101_0010); // 0xD2 - bit 0 rotated to bit 7
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_rrc_hl_indirect_zero_result() {
+        let mut state = State::new();
+        state.set_hl(0x3000);
+        state.write(0x3000, 0x00);
+
+        rrc_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0x3000), 0x00);
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_rl_hl_indirect_with_carry_clear() {
+        let mut state = State::new();
+        state.set_hl(0x4000);
+        state.write(0x4000, 0b0100_1010); // 0x4A
+        state.set_flag_c(false);
+
+        rl_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0x4000), 0b1001_0100); // 0x94 - shifted left, carry in = 0
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 7 was 0
+    }
+
+    #[test]
+    fn test_rl_hl_indirect_with_carry_set() {
+        let mut state = State::new();
+        state.set_hl(0x5000);
+        state.write(0x5000, 0b0100_1010); // 0x4A
+        state.set_flag_c(true);
+
+        rl_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0x5000), 0b1001_0101); // 0x95 - shifted left, carry in = 1
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 7 was 0
+    }
+
+    #[test]
+    fn test_rl_hl_indirect_sets_carry() {
+        let mut state = State::new();
+        state.set_hl(0x6000);
+        state.write(0x6000, 0b1010_1010); // 0xAA
+        state.set_flag_c(false);
+
+        rl_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0x6000), 0b0101_0100); // 0x54 - bit 7 shifted out
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 7 was 1
+    }
+
+    #[test]
+    fn test_rr_hl_indirect_with_carry_clear() {
+        let mut state = State::new();
+        state.set_hl(0x7000);
+        state.write(0x7000, 0b1001_0100); // 0x94
+        state.set_flag_c(false);
+
+        rr_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0x7000), 0b0100_1010); // 0x4A - shifted right, carry in = 0
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 0 was 0
+    }
+
+    #[test]
+    fn test_rr_hl_indirect_with_carry_set() {
+        let mut state = State::new();
+        state.set_hl(0x8000);
+        state.write(0x8000, 0b1001_0100); // 0x94
+        state.set_flag_c(true);
+
+        rr_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0x8000), 0b1100_1010); // 0xCA - shifted right, carry in = 1
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 0 was 0
+    }
+
+    #[test]
+    fn test_rr_hl_indirect_sets_carry() {
+        let mut state = State::new();
+        state.set_hl(0x9000);
+        state.write(0x9000, 0b0101_0101); // 0x55
+        state.set_flag_c(false);
+
+        rr_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0x9000), 0b0010_1010); // 0x2A - bit 0 shifted out
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_rr_hl_indirect_zero_result() {
+        let mut state = State::new();
+        state.set_hl(0xA000);
+        state.write(0xA000, 0x00);
+        state.set_flag_c(false);
+
+        rr_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xA000), 0x00);
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_sla_hl_indirect() {
+        let mut state = State::new();
+        state.set_hl(0xB000);
+        state.write(0xB000, 0b0100_1010); // 0x4A
+
+        sla_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xB000), 0b1001_0100); // 0x94 - shifted left, bit 0 = 0
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 7 was 0
+    }
+
+    #[test]
+    fn test_sla_hl_indirect_sets_carry() {
+        let mut state = State::new();
+        state.set_hl(0xC000);
+        state.write(0xC000, 0b1010_1010); // 0xAA
+
+        sla_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xC000), 0b0101_0100); // 0x54 - bit 7 shifted out
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 7 was 1
+    }
+
+    #[test]
+    fn test_sla_hl_indirect_zero_result() {
+        let mut state = State::new();
+        state.set_hl(0xD000);
+        state.write(0xD000, 0x00);
+
+        sla_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xD000), 0x00);
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_sla_hl_indirect_overflow() {
+        let mut state = State::new();
+        state.set_hl(0xE000);
+        state.write(0xE000, 0b1000_0000); // 0x80
+
+        sla_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xE000), 0x00); // Shifted out, result is 0
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 7 was 1
+    }
+
+    #[test]
+    fn test_sra_hl_indirect_positive() {
+        let mut state = State::new();
+        state.set_hl(0xF000);
+        state.write(0xF000, 0b0100_1010); // 0x4A - positive number (bit 7 = 0)
+
+        sra_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xF000), 0b0010_0101); // 0x25 - bit 7 stays 0
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 0 was 0
+    }
+
+    #[test]
+    fn test_sra_hl_indirect_negative() {
+        let mut state = State::new();
+        state.set_hl(0xF100);
+        state.write(0xF100, 0b1010_1010); // 0xAA - negative number (bit 7 = 1)
+
+        sra_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xF100), 0b1101_0101); // 0xD5 - bit 7 stays 1 (preserves sign)
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 0 was 0
+    }
+
+    #[test]
+    fn test_sra_hl_indirect_sets_carry() {
+        let mut state = State::new();
+        state.set_hl(0xF200);
+        state.write(0xF200, 0b0101_0101); // 0x55
+
+        sra_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xF200), 0b0010_1010); // 0x2A - bit 0 shifted out
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_sra_hl_indirect_zero_result() {
+        let mut state = State::new();
+        state.set_hl(0xF300);
+        state.write(0xF300, 0x00);
+
+        sra_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xF300), 0x00);
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_sra_hl_indirect_preserves_sign_ff() {
+        let mut state = State::new();
+        state.set_hl(0xF400);
+        state.write(0xF400, 0xFF); // All 1s
+
+        sra_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xF400), 0xFF); // Still all 1s (sign preserved)
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_swap_hl_indirect() {
+        let mut state = State::new();
+        state.set_hl(0xF500);
+        state.write(0xF500, 0x12); // Upper nibble = 1, lower nibble = 2
+
+        swap_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xF500), 0x21); // Swapped to 2 and 1
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // SWAP always clears carry
+    }
+
+    #[test]
+    fn test_swap_hl_indirect_zero_result() {
+        let mut state = State::new();
+        state.set_hl(0xF600);
+        state.write(0xF600, 0x00);
+
+        swap_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xF600), 0x00);
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_swap_hl_indirect_symmetric() {
+        let mut state = State::new();
+        state.set_hl(0xF700);
+        state.write(0xF700, 0xAB); // Upper = A, lower = B
+
+        swap_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xF700), 0xBA); // Upper = B, lower = A
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_swap_hl_indirect_double_swap() {
+        let mut state = State::new();
+        state.set_hl(0xF800);
+        state.write(0xF800, 0x34);
+
+        swap_hl_indirect(&mut state);
+        assert_eq!(state.read(0xF800), 0x43);
+
+        swap_hl_indirect(&mut state);
+        assert_eq!(state.read(0xF800), 0x34); // Back to original
+    }
+
+    #[test]
+    fn test_swap_hl_indirect_clears_carry() {
+        let mut state = State::new();
+        state.set_hl(0xF900);
+        state.write(0xF900, 0x56);
+        state.set_flag_c(true); // Set carry before swap
+
+        swap_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xF900), 0x65);
+        assert!(!state.flag_c()); // SWAP always clears carry
     }
 
     #[test]
