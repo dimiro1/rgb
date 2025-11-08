@@ -133,6 +133,22 @@ fn sbc_a(value: u8, state: &mut State) {
     state.a = result;
 }
 
+/// Bitwise AND an 8-bit value with register A and update flags accordingly
+/// Z: Set if result is zero
+/// N: Reset
+/// H: Set (always)
+/// C: Reset
+fn and_a(value: u8, state: &mut State) {
+    let result = state.a & value;
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(false);
+    state.set_flag_h(true);
+    state.set_flag_c(false);
+
+    state.a = result;
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1506,6 +1522,47 @@ pub fn execute(state: &mut State) {
             sbc_a(state.a, state);
             state.cycles += 4;
         }
+        0xA0 => {
+            /* AND B */
+            and_a(state.b, state);
+            state.cycles += 4;
+        }
+        0xA1 => {
+            /* AND C */
+            and_a(state.c, state);
+            state.cycles += 4;
+        }
+        0xA2 => {
+            /* AND D */
+            and_a(state.d, state);
+            state.cycles += 4;
+        }
+        0xA3 => {
+            /* AND E */
+            and_a(state.e, state);
+            state.cycles += 4;
+        }
+        0xA4 => {
+            /* AND H */
+            and_a(state.h, state);
+            state.cycles += 4;
+        }
+        0xA5 => {
+            /* AND L */
+            and_a(state.l, state);
+            state.cycles += 4;
+        }
+        0xA6 => {
+            /* AND (HL) */
+            let value = state.read(state.hl());
+            and_a(value, state);
+            state.cycles += 8;
+        }
+        0xA7 => {
+            /* AND A */
+            and_a(state.a, state);
+            state.cycles += 4;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -1865,6 +1922,79 @@ mod tests {
         assert!(!state.flag_z());
         assert!(state.flag_n());
         assert!(state.flag_h()); // 0x0 < 0x0 + 1
+        assert!(!state.flag_c());
+    }
+
+    // Tests for AND A,r
+    #[test]
+    fn test_and_a_normal() {
+        let mut state = State::new();
+        state.a = 0b11110000;
+
+        and_a(0b10101010, &mut state);
+
+        assert_eq!(state.a, 0b10100000);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h()); // H always set for AND
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_and_a_zero_result() {
+        let mut state = State::new();
+        state.a = 0b11110000;
+
+        and_a(0b00001111, &mut state);
+
+        assert_eq!(state.a, 0x00);
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_and_a_with_self() {
+        let mut state = State::new();
+        state.a = 0x5A;
+
+        and_a(0x5A, &mut state);
+
+        assert_eq!(state.a, 0x5A);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_and_a_clears_carry() {
+        let mut state = State::new();
+        state.a = 0xFF;
+        state.set_flag_c(true); // Set carry flag
+        state.set_flag_n(true); // Set N flag
+
+        and_a(0xFF, &mut state);
+
+        assert_eq!(state.a, 0xFF);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n()); // N cleared
+        assert!(state.flag_h()); // H set
+        assert!(!state.flag_c()); // C cleared
+    }
+
+    #[test]
+    fn test_and_a_with_zero() {
+        let mut state = State::new();
+        state.a = 0xFF;
+
+        and_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0x00);
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(state.flag_h());
         assert!(!state.flag_c());
     }
 
