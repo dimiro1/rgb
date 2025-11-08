@@ -165,6 +165,22 @@ fn xor_a(value: u8, state: &mut State) {
     state.a = result;
 }
 
+/// Bitwise OR an 8-bit value with register A and update flags accordingly
+/// Z: Set if result is zero
+/// N: Reset
+/// H: Reset
+/// C: Reset
+fn or_a(value: u8, state: &mut State) {
+    let result = state.a | value;
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(false);
+    state.set_flag_h(false);
+    state.set_flag_c(false);
+
+    state.a = result;
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1620,6 +1636,47 @@ pub fn execute(state: &mut State) {
             xor_a(state.a, state);
             state.cycles += 4;
         }
+        0xB0 => {
+            /* OR B */
+            or_a(state.b, state);
+            state.cycles += 4;
+        }
+        0xB1 => {
+            /* OR C */
+            or_a(state.c, state);
+            state.cycles += 4;
+        }
+        0xB2 => {
+            /* OR D */
+            or_a(state.d, state);
+            state.cycles += 4;
+        }
+        0xB3 => {
+            /* OR E */
+            or_a(state.e, state);
+            state.cycles += 4;
+        }
+        0xB4 => {
+            /* OR H */
+            or_a(state.h, state);
+            state.cycles += 4;
+        }
+        0xB5 => {
+            /* OR L */
+            or_a(state.l, state);
+            state.cycles += 4;
+        }
+        0xB6 => {
+            /* OR (HL) */
+            let value = state.read(state.hl());
+            or_a(value, state);
+            state.cycles += 8;
+        }
+        0xB7 => {
+            /* OR A */
+            or_a(state.a, state);
+            state.cycles += 4;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -2127,6 +2184,80 @@ mod tests {
         assert!(!state.flag_n());
         assert!(!state.flag_h());
         assert!(!state.flag_c());
+    }
+
+    // Tests for OR A,r
+    #[test]
+    fn test_or_a_normal() {
+        let mut state = State::new();
+        state.a = 0b11110000;
+
+        or_a(0b10101010, &mut state);
+
+        assert_eq!(state.a, 0b11111010);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_or_a_with_self() {
+        let mut state = State::new();
+        state.a = 0x5A;
+
+        or_a(0x5A, &mut state);
+
+        assert_eq!(state.a, 0x5A); // OR with self is identity
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_or_a_with_zero() {
+        let mut state = State::new();
+        state.a = 0xFF;
+
+        or_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0xFF); // OR with 0 is identity
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_or_a_zero_result() {
+        let mut state = State::new();
+        state.a = 0x00;
+
+        or_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0x00);
+        assert!(state.flag_z()); // Zero result
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_or_a_clears_all_flags() {
+        let mut state = State::new();
+        state.a = 0x0F;
+        state.set_flag_c(true); // Set carry flag
+        state.set_flag_n(true); // Set N flag
+        state.set_flag_h(true); // Set H flag
+
+        or_a(0xF0, &mut state);
+
+        assert_eq!(state.a, 0xFF);
+        assert!(!state.flag_z());
+        assert!(!state.flag_n()); // N cleared
+        assert!(!state.flag_h()); // H cleared
+        assert!(!state.flag_c()); // C cleared
     }
 
     #[test]
