@@ -1856,6 +1856,13 @@ pub fn execute(state: &mut State) {
             call(state);
             state.cycles += 24;
         }
+        0xCE => {
+            /* ADC A,n */
+            let value = state.read(state.pc);
+            state.pc += 1;
+            adc_a(value, state);
+            state.cycles += 8;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
