@@ -7,7 +7,7 @@ pub const DIV: u16 = 0xFF04; // Divider register
 pub const TIMA: u16 = 0xFF05; // Timer counter
 pub const TMA: u16 = 0xFF06; // Timer modulo
 pub const TAC: u16 = 0xFF07; // Timer control
-// pub const IF: u16 = 0xFF0F; // Interrupt flag
+pub const IF: u16 = 0xFF0F; // Interrupt flag
 
 // Sound registers
 pub const NR_10: u16 = 0xFF10; // Channel 1 sweep

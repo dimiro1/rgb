@@ -1,4 +1,64 @@
+use crate::io::{IE, IF};
 use crate::system::State;
+
+/// Check if there are any pending interrupts that should wake the CPU
+fn has_pending_interrupt(state: &State) -> bool {
+    let ie = state.read(IE); // Interrupt Enable
+    let if_flags = state.read(IF); // Interrupt Flags
+
+    // Check if any enabled interrupt has its flag set
+    (ie & if_flags & 0x1F) != 0
+}
+
+/// Service pending interrupts if IME is enabled
+/// Returns true if an interrupt was serviced
+fn service_interrupts(state: &mut State) -> bool {
+    if !state.ime {
+        return false;
+    }
+
+    let ie = state.read(IE);
+    let if_flags = state.read(IF);
+    let pending = ie & if_flags & 0x1F;
+
+    if pending == 0 {
+        return false;
+    }
+
+    // Find the highest priority interrupt (lowest bit number)
+    // Priority: V-Blank (bit 0) > LCD STAT (bit 1) > Timer (bit 2) > Serial (bit 3) > Joypad (bit 4)
+    let interrupt_bit = pending.trailing_zeros();
+
+    // Interrupt vectors
+    let vector = match interrupt_bit {
+        0 => 0x0040,       // V-Blank
+        1 => 0x0048,       // LCD STAT
+        2 => 0x0050,       // Timer
+        3 => 0x0058,       // Serial
+        4 => 0x0060,       // Joypad
+        _ => return false, // Should never happen
+    };
+
+    // Disable IME
+    state.ime = false;
+
+    // Exit HALT mode if CPU was halted
+    state.halt = false;
+
+    // Clear the interrupt flag
+    let new_if = if_flags & !(1 << interrupt_bit);
+    state.write(IF, new_if);
+
+    // Push PC onto stack
+    state.sp = state.sp.wrapping_sub(2);
+    state.write(state.sp, (state.pc & 0xFF) as u8);
+    state.write(state.sp.wrapping_add(1), (state.pc >> 8) as u8);
+
+    // Jump to interrupt vector
+    state.pc = vector;
+
+    true
+}
 
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
@@ -512,7 +572,44 @@ pub fn dec_sp(state: &mut State) {
 
 /// Execute a single CPU instruction.
 pub fn execute(state: &mut State) {
-    // TODO: handle interrupts
+    // Service any pending interrupts
+    if service_interrupts(state) {
+        // Interrupt was serviced, return early (PC now points to interrupt handler)
+        return;
+    }
+
+    // Handle delayed interrupt enable/disable (EI and DI take effect after next instruction)
+    // This must happen before halt check so IME changes are processed even when halted
+    if state.di_delay {
+        let prev_opcode = state.read(state.pc.wrapping_sub(1));
+        if prev_opcode != 0xF3 {
+            // 0xF3 is DI opcode
+            state.di_delay = false;
+            state.ime = false;
+        }
+    }
+
+    if state.ei_delay {
+        let prev_opcode = state.read(state.pc.wrapping_sub(1));
+        if prev_opcode != 0xFB {
+            // 0xFB is EI opcode
+            state.ei_delay = false;
+            state.ime = true;
+        }
+    }
+
+    // If halted, check for interrupts to wake up
+    if state.halt {
+        // Check if there are any pending interrupts
+        if has_pending_interrupt(state) {
+            state.halt = false;
+            // If IME is enabled, the interrupt will be handled by interrupt logic
+            // If IME is disabled, we just continue execution (HALT bug behavior)
+        } else {
+            // Still halted, don't execute instruction
+            return;
+        }
+    }
 
     // TODO: This is not fully correct, in fact the read function must take into consideration the
     // current emomory bank and other detalis.
@@ -988,6 +1085,12 @@ pub fn execute(state: &mut State) {
         0x75 => {
             /* LD (HL),L */
             state.write(state.hl(), state.l);
+        }
+        0x76 => {
+            /* HALT */
+            if state.ime {
+                state.halt = true;
+            }
         }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
@@ -2279,5 +2382,302 @@ mod tests {
         assert!(state.flag_z()); // Z flag set
         assert!(!state.flag_h());
         assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_none() {
+        let mut state = State::new();
+        state.write(IE, 0x00); // No interrupts enabled
+        state.write(IF, 0x00); // No interrupts flagged
+
+        assert!(!has_pending_interrupt(&state));
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_enabled_but_not_flagged() {
+        let mut state = State::new();
+        state.write(IE, 0x1F); // All interrupts enabled
+        state.write(IF, 0x00); // No interrupts flagged
+
+        assert!(!has_pending_interrupt(&state));
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_flagged_but_not_enabled() {
+        let mut state = State::new();
+        state.write(IE, 0x00); // No interrupts enabled
+        state.write(IF, 0x1F); // All interrupts flagged
+
+        assert!(!has_pending_interrupt(&state));
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_vblank() {
+        let mut state = State::new();
+        state.write(IE, 0x01); // V-Blank enabled (bit 0)
+        state.write(IF, 0x01); // V-Blank flagged (bit 0)
+
+        assert!(has_pending_interrupt(&state));
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_lcd_stat() {
+        let mut state = State::new();
+        state.write(IE, 0x02); // LCD STAT enabled (bit 1)
+        state.write(IF, 0x02); // LCD STAT flagged (bit 1)
+
+        assert!(has_pending_interrupt(&state));
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_timer() {
+        let mut state = State::new();
+        state.write(IE, 0x04); // Timer enabled (bit 2)
+        state.write(IF, 0x04); // Timer flagged (bit 2)
+
+        assert!(has_pending_interrupt(&state));
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_serial() {
+        let mut state = State::new();
+        state.write(IE, 0x08); // Serial enabled (bit 3)
+        state.write(IF, 0x08); // Serial flagged (bit 3)
+
+        assert!(has_pending_interrupt(&state));
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_joypad() {
+        let mut state = State::new();
+        state.write(IE, 0x10); // Joypad enabled (bit 4)
+        state.write(IF, 0x10); // Joypad flagged (bit 4)
+
+        assert!(has_pending_interrupt(&state));
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_multiple() {
+        let mut state = State::new();
+        state.write(IE, 0x1F); // All interrupts enabled
+        state.write(IF, 0x03); // V-Blank and LCD STAT flagged
+
+        assert!(has_pending_interrupt(&state));
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_partial_match() {
+        let mut state = State::new();
+        state.write(IE, 0x05); // V-Blank and Timer enabled
+        state.write(IF, 0x07); // V-Blank, LCD STAT, and Timer flagged
+
+        assert!(has_pending_interrupt(&state)); // Should match on V-Blank and Timer
+    }
+
+    #[test]
+    fn test_has_pending_interrupt_ignores_upper_bits() {
+        let mut state = State::new();
+        state.write(IE, 0xFF); // All bits set
+        state.write(IF, 0xE0); // Only upper bits set (not valid interrupts)
+
+        assert!(!has_pending_interrupt(&state)); // Upper bits should be masked
+    }
+
+    #[test]
+    fn test_service_interrupts_ime_disabled() {
+        let mut state = State::new();
+        state.ime = false;
+        state.write(IE, 0x1F); // All interrupts enabled
+        state.write(IF, 0x1F); // All interrupts flagged
+        state.pc = 0x1000;
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(!serviced);
+        assert_eq!(state.pc, 0x1000); // PC unchanged
+        assert!(!state.ime); // IME still disabled
+    }
+
+    #[test]
+    fn test_service_interrupts_no_pending() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x00); // No interrupts enabled
+        state.write(IF, 0x1F); // All interrupts flagged
+        state.pc = 0x1000;
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(!serviced);
+        assert_eq!(state.pc, 0x1000); // PC unchanged
+        assert!(state.ime); // IME still enabled
+    }
+
+    #[test]
+    fn test_service_interrupts_vblank() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x01); // V-Blank enabled
+        state.write(IF, 0x01); // V-Blank flagged
+        state.pc = 0x1234;
+        state.set_sp(0xFFFE);
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(serviced);
+        assert_eq!(state.pc, 0x0040); // Jumped to V-Blank vector
+        assert!(!state.ime); // IME disabled
+        assert_eq!(state.read(IF), 0x00); // V-Blank flag cleared
+        assert_eq!(state.sp(), 0xFFFC); // SP decremented by 2
+        assert_eq!(state.read(0xFFFC), 0x34); // Low byte of PC pushed
+        assert_eq!(state.read(0xFFFD), 0x12); // High byte of PC pushed
+    }
+
+    #[test]
+    fn test_service_interrupts_lcd_stat() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x02); // LCD STAT enabled
+        state.write(IF, 0x02); // LCD STAT flagged
+        state.pc = 0x5678;
+        state.set_sp(0xC000);
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(serviced);
+        assert_eq!(state.pc, 0x0048); // Jumped to LCD STAT vector
+        assert!(!state.ime);
+        assert_eq!(state.read(IF), 0x00);
+    }
+
+    #[test]
+    fn test_service_interrupts_timer() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x04); // Timer enabled
+        state.write(IF, 0x04); // Timer flagged
+        state.pc = 0xABCD;
+        state.set_sp(0xD000);
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(serviced);
+        assert_eq!(state.pc, 0x0050); // Jumped to Timer vector
+        assert!(!state.ime);
+        assert_eq!(state.read(IF), 0x00);
+    }
+
+    #[test]
+    fn test_service_interrupts_serial() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x08); // Serial enabled
+        state.write(IF, 0x08); // Serial flagged
+        state.pc = 0x2000;
+        state.set_sp(0xE000);
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(serviced);
+        assert_eq!(state.pc, 0x0058); // Jumped to Serial vector
+        assert!(!state.ime);
+        assert_eq!(state.read(IF), 0x00);
+    }
+
+    #[test]
+    fn test_service_interrupts_joypad() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x10); // Joypad enabled
+        state.write(IF, 0x10); // Joypad flagged
+        state.pc = 0x3000;
+        state.set_sp(0xF000);
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(serviced);
+        assert_eq!(state.pc, 0x0060); // Jumped to Joypad vector
+        assert!(!state.ime);
+        assert_eq!(state.read(IF), 0x00);
+    }
+
+    #[test]
+    fn test_service_interrupts_priority_vblank_highest() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x1F); // All interrupts enabled
+        state.write(IF, 0x1F); // All interrupts flagged
+        state.pc = 0x1000;
+        state.set_sp(0xFFFE);
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(serviced);
+        assert_eq!(state.pc, 0x0040); // V-Blank has highest priority
+        assert_eq!(state.read(IF), 0x1E); // Only V-Blank flag cleared
+    }
+
+    #[test]
+    fn test_service_interrupts_priority_lcd_stat_second() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x1F); // All interrupts enabled
+        state.write(IF, 0x1E); // All except V-Blank flagged
+        state.pc = 0x1000;
+        state.set_sp(0xFFFE);
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(serviced);
+        assert_eq!(state.pc, 0x0048); // LCD STAT is next priority
+        assert_eq!(state.read(IF), 0x1C); // Only LCD STAT flag cleared
+    }
+
+    #[test]
+    fn test_service_interrupts_priority_joypad_lowest() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x10); // Only Joypad enabled
+        state.write(IF, 0x1F); // All interrupts flagged
+        state.pc = 0x1000;
+        state.set_sp(0xFFFE);
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(serviced);
+        assert_eq!(state.pc, 0x0060); // Joypad handled because it's the only enabled one
+        assert_eq!(state.read(IF), 0x0F); // Only Joypad flag cleared
+    }
+
+    #[test]
+    fn test_service_interrupts_partial_flags_cleared() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x05); // V-Blank and Timer enabled
+        state.write(IF, 0x07); // V-Blank, LCD STAT, and Timer flagged
+        state.pc = 0x1000;
+        state.set_sp(0xFFFE);
+
+        let serviced = service_interrupts(&mut state);
+
+        assert!(serviced);
+        assert_eq!(state.pc, 0x0040); // V-Blank serviced
+        assert_eq!(state.read(IF), 0x06); // V-Blank cleared, LCD STAT and Timer remain
+    }
+
+    #[test]
+    fn test_service_interrupts_stack_push_correct_order() {
+        let mut state = State::new();
+        state.ime = true;
+        state.write(IE, 0x01);
+        state.write(IF, 0x01);
+        state.pc = 0xABCD;
+        state.set_sp(0xC100);
+
+        service_interrupts(&mut state);
+
+        assert_eq!(state.sp(), 0xC0FE);
+        assert_eq!(state.read(0xC0FE), 0xCD); // Low byte at lower address
+        assert_eq!(state.read(0xC0FF), 0xAB); // High byte at higher address
     }
 }
