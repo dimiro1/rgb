@@ -98,6 +98,41 @@ fn adc_a(value: u8, state: &mut State) {
     state.a = result;
 }
 
+/// Subtract an 8-bit value from register A and update flags accordingly
+/// Z: Set if result is zero
+/// N: Set (subtraction operation)
+/// H: Set if borrow from bit 4
+/// C: Set if borrow (A < value)
+fn sub_a(value: u8, state: &mut State) {
+    let a = state.a;
+    let result = a.wrapping_sub(value);
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(true);
+    state.set_flag_h((a & 0xF) < (value & 0xF));
+    state.set_flag_c(a < value);
+
+    state.a = result;
+}
+
+/// Subtract an 8-bit value plus carry flag from register A and update flags accordingly
+/// Z: Set if result is zero
+/// N: Set (subtraction operation)
+/// H: Set if borrow from bit 4
+/// C: Set if borrow
+fn sbc_a(value: u8, state: &mut State) {
+    let a = state.a;
+    let carry = if state.flag_c() { 1 } else { 0 };
+    let result = a.wrapping_sub(value).wrapping_sub(carry);
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(true);
+    state.set_flag_h((a & 0xF) < (value & 0xF) + carry);
+    state.set_flag_c((a as u16) < (value as u16) + (carry as u16));
+
+    state.a = result;
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1389,6 +1424,88 @@ pub fn execute(state: &mut State) {
             adc_a(state.a, state);
             state.cycles += 4;
         }
+        0x90 => {
+            /* SUB B */
+            sub_a(state.b, state);
+            state.cycles += 4;
+        }
+        0x91 => {
+            /* SUB C */
+            sub_a(state.c, state);
+            state.cycles += 4;
+        }
+        0x92 => {
+            /* SUB D */
+            sub_a(state.d, state);
+            state.cycles += 4;
+        }
+        0x93 => {
+            /* SUB E */
+            sub_a(state.e, state);
+            state.cycles += 4;
+        }
+        0x94 => {
+            /* SUB H */
+            sub_a(state.h, state);
+            state.cycles += 4;
+        }
+        0x95 => {
+            /* SUB L */
+            sub_a(state.l, state);
+            state.cycles += 4;
+        }
+        0x96 => {
+            /* SUB (HL) */
+            let value = state.read(state.hl());
+            sub_a(value, state);
+            state.cycles += 8;
+        }
+        0x97 => {
+            /* SUB A */
+            sub_a(state.a, state);
+            state.cycles += 4;
+        }
+        0x98 => {
+            /* SBC A,B */
+            sbc_a(state.b, state);
+            state.cycles += 4;
+        }
+        0x99 => {
+            /* SBC A,C */
+            sbc_a(state.c, state);
+            state.cycles += 4;
+        }
+        0x9A => {
+            /* SBC A,D */
+            sbc_a(state.d, state);
+            state.cycles += 4;
+        }
+        0x9B => {
+            /* SBC A,E */
+            sbc_a(state.e, state);
+            state.cycles += 4;
+        }
+        0x9C => {
+            /* SBC A,H */
+            sbc_a(state.h, state);
+            state.cycles += 4;
+        }
+        0x9D => {
+            /* SBC A,L */
+            sbc_a(state.l, state);
+            state.cycles += 4;
+        }
+        0x9E => {
+            /* SBC A,(HL) */
+            let value = state.read(state.hl());
+            sbc_a(value, state);
+            state.cycles += 8;
+        }
+        0x9F => {
+            /* SBC A,A */
+            sbc_a(state.a, state);
+            state.cycles += 4;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -1602,6 +1719,153 @@ mod tests {
         assert!(!state.flag_n());
         assert!(state.flag_h()); // Half carry
         assert!(state.flag_c()); // Carry
+    }
+
+    // Tests for SUB A,r
+    #[test]
+    fn test_sub_a_normal() {
+        let mut state = State::new();
+        state.a = 0x3E;
+
+        sub_a(0x0F, &mut state);
+
+        assert_eq!(state.a, 0x2F);
+        assert!(!state.flag_z());
+        assert!(state.flag_n()); // Subtraction
+        assert!(state.flag_h()); // Borrow: 0xE < 0xF
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_sub_a_zero_result() {
+        let mut state = State::new();
+        state.a = 0x42;
+
+        sub_a(0x42, &mut state);
+
+        assert_eq!(state.a, 0x00);
+        assert!(state.flag_z());
+        assert!(state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_sub_a_underflow() {
+        let mut state = State::new();
+        state.a = 0x00;
+
+        sub_a(0x01, &mut state);
+
+        assert_eq!(state.a, 0xFF);
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(state.flag_h()); // Borrow
+        assert!(state.flag_c()); // Borrow
+    }
+
+    #[test]
+    fn test_sub_a_half_borrow() {
+        let mut state = State::new();
+        state.a = 0x10;
+
+        sub_a(0x01, &mut state);
+
+        assert_eq!(state.a, 0x0F);
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(state.flag_h()); // 0x0 < 0x1 (half borrow)
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_sub_a_no_half_borrow() {
+        let mut state = State::new();
+        state.a = 0x0F;
+
+        sub_a(0x01, &mut state);
+
+        assert_eq!(state.a, 0x0E);
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(!state.flag_h()); // No half borrow
+        assert!(!state.flag_c());
+    }
+
+    // Tests for SBC A,r
+    #[test]
+    fn test_sbc_a_normal_no_carry() {
+        let mut state = State::new();
+        state.a = 0x3E;
+        state.set_flag_c(false);
+
+        sbc_a(0x0F, &mut state);
+
+        assert_eq!(state.a, 0x2F);
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(state.flag_h()); // Borrow
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_sbc_a_with_carry_flag() {
+        let mut state = State::new();
+        state.a = 0x3E;
+        state.set_flag_c(true);
+
+        sbc_a(0x0F, &mut state);
+
+        assert_eq!(state.a, 0x2E); // 0x3E - 0x0F - 1 = 0x2E
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(state.flag_h()); // 0xE < 0xF + 1
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_sbc_a_zero_result_with_carry() {
+        let mut state = State::new();
+        state.a = 0x01;
+        state.set_flag_c(true);
+
+        sbc_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0x00); // 0x01 - 0x00 - 1 = 0x00
+        assert!(state.flag_z());
+        assert!(state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_sbc_a_underflow_with_carry() {
+        let mut state = State::new();
+        state.a = 0x00;
+        state.set_flag_c(true);
+
+        sbc_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0xFF); // 0x00 - 0x00 - 1 = 0xFF
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(state.flag_h()); // Borrow
+        assert!(state.flag_c()); // Borrow
+    }
+
+    #[test]
+    fn test_sbc_a_half_borrow_from_carry() {
+        let mut state = State::new();
+        state.a = 0x10;
+        state.set_flag_c(true);
+
+        sbc_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0x0F); // 0x10 - 0x00 - 1 = 0x0F
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(state.flag_h()); // 0x0 < 0x0 + 1
+        assert!(!state.flag_c());
     }
 
     #[test]
