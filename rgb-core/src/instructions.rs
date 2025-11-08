@@ -286,6 +286,12 @@ pub fn call_nz(state: &mut State) {
     }
 }
 
+/// RST 08h - Push PC and jump to address 0x0008
+pub fn rst_08(state: &mut State) {
+    push_16bit(state.pc, state);
+    state.pc = 0x0008;
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1863,6 +1869,11 @@ pub fn execute(state: &mut State) {
             adc_a(value, state);
             state.cycles += 8;
         }
+        0xCF => {
+            /* RST 08h */
+            rst_08(state);
+            state.cycles += 16;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -2761,6 +2772,24 @@ mod tests {
         // Verify little-endian storage (low byte at lower address)
         assert_eq!(state.read(0x1FFE), 0xCD); // Low byte
         assert_eq!(state.read(0x1FFF), 0xAB); // High byte
+    }
+
+    // Tests for RST
+    #[test]
+    fn test_rst_08_pushes_pc_and_jumps() {
+        let mut state = State::new();
+        state.pc = 0x1234;
+        state.sp = 0xFFFE;
+
+        rst_08(&mut state);
+
+        // PC should be at RST vector 0x0008
+        assert_eq!(state.pc, 0x0008);
+
+        // Return address (0x1234) should be pushed onto stack
+        assert_eq!(state.sp, 0xFFFC);
+        assert_eq!(state.read(0xFFFC), 0x34); // Low byte
+        assert_eq!(state.read(0xFFFD), 0x12); // High byte
     }
 
     #[test]
