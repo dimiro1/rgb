@@ -1,6 +1,6 @@
 use crate::io::{IE, IF};
 use crate::memory::Memory;
-use crate::system::{GameBoy, update_timers};
+use crate::system::GameBoy;
 
 #[cfg(test)]
 use crate::memory::FlatMemory;
@@ -553,7 +553,7 @@ fn ld_a_nn<M: Memory>(state: &mut GameBoy<M>) {
 /// Pop 16-bit value from stack into AF register pair
 fn pop_af<M: Memory>(state: &mut GameBoy<M>) {
     let value = pop_word(state);
-    state.f = value as u8; // Low byte (flags)
+    state.f = (value as u8) & 0xF0; // Low byte (flags), lower 4 bits always 0
     state.a = (value >> 8) as u8; // High byte
 }
 
@@ -1256,11 +1256,14 @@ fn jr<M: Memory>(state: &mut GameBoy<M>) {
 }
 
 /// JR NZ - Jump relative if not zero (Z flag is not set)
-fn jr_nz<M: Memory>(state: &mut GameBoy<M>) {
+fn jr_nz<M: Memory>(state: &mut GameBoy<M>) -> bool {
     let offset = read_immediate_byte(state) as i8;
 
     if !state.flag_z() {
         state.pc = state.pc.wrapping_add(offset as u16);
+        true
+    } else {
+        false
     }
 }
 
@@ -1293,29 +1296,38 @@ fn daa<M: Memory>(state: &mut GameBoy<M>) {
 }
 
 /// JR Z - Jump relative if zero (Z flag is set)
-fn jr_z<M: Memory>(state: &mut GameBoy<M>) {
+fn jr_z<M: Memory>(state: &mut GameBoy<M>) -> bool {
     let offset = read_immediate_byte(state) as i8;
 
     if state.flag_z() {
         state.pc = state.pc.wrapping_add(offset as u16);
+        true
+    } else {
+        false
     }
 }
 
 /// JR NC - Jump relative if not carry (C flag is not set)
-fn jr_nc<M: Memory>(state: &mut GameBoy<M>) {
+fn jr_nc<M: Memory>(state: &mut GameBoy<M>) -> bool {
     let offset = read_immediate_byte(state) as i8;
 
     if !state.flag_c() {
         state.pc = state.pc.wrapping_add(offset as u16);
+        true
+    } else {
+        false
     }
 }
 
 /// JR C - Jump relative if carry (C flag is set)
-fn jr_c<M: Memory>(state: &mut GameBoy<M>) {
+fn jr_c<M: Memory>(state: &mut GameBoy<M>) -> bool {
     let offset = read_immediate_byte(state) as i8;
 
     if state.flag_c() {
         state.pc = state.pc.wrapping_add(offset as u16);
+        true
+    } else {
+        false
     }
 }
 
@@ -1458,12 +1470,10 @@ pub fn execute<M: Memory>(state: &mut GameBoy<M>) {
 
     // Handle HALT mode and HALT bug
     if !handle_halt(state) {
-        // CPU is still halted, don't execute instruction
+        // CPU is still halted, but we need to consume cycles for timers/PPU to work
+        state.cycles += 4; // Consume 4 cycles while halted
         return;
     }
-
-    // Track cycles before instruction execution
-    let cycles_before = state.cycles;
 
     let op = read_immediate_byte(state);
     state.last_opcode = op; // Store for delayed interrupt handling
@@ -1594,7 +1604,7 @@ pub fn execute<M: Memory>(state: &mut GameBoy<M>) {
         0x18 => {
             /* JR */
             jr(state);
-            state.cycles += 8;
+            state.cycles += 12;
         }
         0x19 => {
             /* ADD HL,DE */
@@ -1633,8 +1643,11 @@ pub fn execute<M: Memory>(state: &mut GameBoy<M>) {
         }
         0x20 => {
             /* JR NZ */
-            jr_nz(state);
-            state.cycles += 8;
+            if jr_nz(state) {
+                state.cycles += 12;
+            } else {
+                state.cycles += 8;
+            }
         }
         0x21 => {
             /* LD HL,n */
@@ -1675,8 +1688,11 @@ pub fn execute<M: Memory>(state: &mut GameBoy<M>) {
         }
         0x28 => {
             /* JR Z */
-            jr_z(state);
-            state.cycles += 8;
+            if jr_z(state) {
+                state.cycles += 12;
+            } else {
+                state.cycles += 8;
+            }
         }
         0x29 => {
             /* ADD HL,HL */
@@ -1716,8 +1732,11 @@ pub fn execute<M: Memory>(state: &mut GameBoy<M>) {
         }
         0x30 => {
             /* JR NC */
-            jr_nc(state);
-            state.cycles += 8;
+            if jr_nc(state) {
+                state.cycles += 12;
+            } else {
+                state.cycles += 8;
+            }
         }
         0x31 => {
             /* LD SP,n */
@@ -1759,8 +1778,11 @@ pub fn execute<M: Memory>(state: &mut GameBoy<M>) {
         }
         0x38 => {
             /* JR C */
-            jr_c(state);
-            state.cycles += 8;
+            if jr_c(state) {
+                state.cycles += 12;
+            } else {
+                state.cycles += 8;
+            }
         }
         0x39 => {
             /* ADD HL,SP */
@@ -3180,10 +3202,6 @@ pub fn execute<M: Memory>(state: &mut GameBoy<M>) {
             state.cycles += 16;
         }
     }
-
-    // Update timers based on cycles consumed by this instruction
-    let cycles_consumed = state.cycles - cycles_before;
-    update_timers(state, cycles_consumed);
 }
 
 #[cfg(test)]
@@ -4575,12 +4593,12 @@ mod tests {
     fn test_ldh_c_a() {
         let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x99;
-        state.c = 0x44;
+        state.c = 0x80; // Use HRAM address instead of LY
 
         ldh_c_a(&mut state);
 
-        // Verify A was written to 0xFF44
-        assert_eq!(state.read(0xFF44), 0x99);
+        // Verify A was written to 0xFF80
+        assert_eq!(state.read(0xFF80), 0x99);
     }
 
     #[test]
@@ -6881,14 +6899,14 @@ mod tests {
     fn test_ldh_a_c() {
         let mut state = GameBoy::<FlatMemory>::new();
         state.a = 0x00;
-        state.c = 0x44;
+        state.c = 0x80; // Use HRAM address instead of LY
 
-        // Write test value at 0xFF44
-        state.write(0xFF44, 0x99);
+        // Write test value at 0xFF80
+        state.write(0xFF80, 0x99);
 
         ldh_a_c(&mut state);
 
-        // Verify A was loaded from 0xFF44
+        // Verify A was loaded from 0xFF80
         assert_eq!(state.a, 0x99);
     }
 

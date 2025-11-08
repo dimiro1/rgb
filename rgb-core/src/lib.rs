@@ -4,4 +4,5 @@ pub mod instructions;
 pub mod io;
 pub mod memory;
 pub mod mmu;
+pub mod ppu;
 pub mod system;

@@ -1,6 +1,7 @@
 use crate::cartridge::Cartridge;
 use crate::memory::{FlatMemory, Memory};
 use crate::mmu::Mmu;
+use crate::ppu::Ppu;
 
 /// Game Boy emulator
 ///
@@ -28,8 +29,15 @@ pub struct GameBoy<M: Memory = Mmu> {
     pub halt_bug: bool,  // HALT bug triggered (PC not incremented after HALT)
     pub ei_delay: bool,  // EI takes effect after next instruction
     pub di_delay: bool,  // DI takes effect after next instruction
-    pub cycles: u32,     // Total CPU cycles executed
+    pub cycles: u64,     // Total CPU cycles executed
     pub last_opcode: u8, // Last executed opcode (for delayed interrupt handling)
+
+    // Timer State
+    pub div_counter: u64, // Internal counter for DIV register (increments every cycle)
+    pub tima_counter: u64, // Internal counter for TIMA register
+
+    // PPU (Picture Processing Unit)
+    pub ppu: Ppu,
 
     // Memory (generic over Memory trait)
     pub mmu: M,
@@ -59,6 +67,13 @@ impl GameBoy<Mmu> {
             di_delay: false,
             cycles: 0,
             last_opcode: 0,
+
+            // Timer state
+            div_counter: 0,
+            tima_counter: 0,
+
+            // PPU
+            ppu: Ppu::new(),
 
             // MMU with cartridge
             mmu: Mmu::new(cartridge),
@@ -136,6 +151,13 @@ impl<M: Memory> GameBoy<M> {
             cycles: 0,
             last_opcode: 0,
 
+            // Timer state
+            div_counter: 0,
+            tima_counter: 0,
+
+            // PPU
+            ppu: Ppu::new(),
+
             mmu: memory,
         }
     }
@@ -143,12 +165,33 @@ impl<M: Memory> GameBoy<M> {
     /// Read a byte from memory
     #[inline]
     pub fn read(&self, addr: u16) -> u8 {
+        use crate::io::LY;
+
+        // Intercept PPU register reads
+        if addr == LY {
+            return self.ppu.read_ly();
+        }
+
         self.mmu.read(addr)
     }
 
     /// Write a byte to memory
     #[inline]
     pub fn write(&mut self, addr: u16, value: u8) {
+        use crate::io::{DIV, LY};
+
+        // Handle special I/O register behaviors
+        match addr {
+            LY => return, // LY register is read-only, ignore writes
+            DIV => {
+                // Writing any value to DIV resets it to 0x00 and resets the internal counter
+                self.mmu.write(addr, 0x00);
+                self.div_counter = 0;
+                return;
+            }
+            _ => {}
+        }
+
         self.mmu.write(addr, value)
     }
 
@@ -284,9 +327,67 @@ impl<M: Memory> GameBoy<M> {
         }
     }
 
-    /// Execute one CPU instruction
-    pub fn execute(&mut self) {
+    /// Step the emulator by one CPU instruction
+    ///
+    /// This executes one CPU instruction and updates all subsystems (PPU, timers, etc.)
+    pub fn step(&mut self) {
+        let cycles_before = self.cycles;
         crate::instructions::execute(self);
+        let cycles_consumed = self.cycles - cycles_before;
+
+        // Update timers/PPU based on cycles consumed by the instruction or interrupt servicing
+        update_timers(self, cycles_consumed);
+        self.ppu.step(cycles_consumed);
+    }
+
+    /// Run the emulator for a specified number of instructions
+    ///
+    /// This executes instructions in batches, optionally calling a callback
+    /// after each batch for tasks like rendering, input handling, etc.
+    ///
+    /// # Arguments
+    /// * `max_instructions` - Maximum number of instructions to execute (None = run forever)
+    /// * `batch_size` - Number of instructions to execute before yielding
+    /// * `callback` - Optional function called after each batch, returns false to stop
+    ///
+    /// # Returns
+    /// Total number of instructions executed
+    pub fn run<F>(&mut self, max_instructions: Option<u64>, batch_size: u64, mut callback: F) -> u64
+    where
+        F: FnMut(&mut Self) -> bool,
+    {
+        let mut total_executed = 0u64;
+
+        loop {
+            // Execute a batch of instructions
+            for _ in 0..batch_size {
+                self.step();
+                total_executed += 1;
+
+                // Check if we've hit the max
+                if let Some(max) = max_instructions {
+                    if total_executed >= max {
+                        return total_executed;
+                    }
+                }
+            }
+
+            // Call the callback after each batch
+            // If it returns false, stop execution
+            if !callback(self) {
+                break;
+            }
+        }
+
+        total_executed
+    }
+
+    /// Run the emulator for a specified number of instructions without callbacks
+    ///
+    /// This is a simpler version of `run()` for cases where you just want to
+    /// execute instructions without any periodic callbacks.
+    pub fn run_simple(&mut self, max_instructions: u64) -> u64 {
+        self.run(Some(max_instructions), max_instructions, |_| true)
     }
 }
 
@@ -331,15 +432,19 @@ impl GameBoy<FlatMemory> {
 /// - TIMA (0xFF05): Timer counter, increments at frequency set by TAC
 /// - TMA (0xFF06): Timer modulo, loaded into TIMA when it overflows
 /// - TAC (0xFF07): Timer control (bit 2 = enable, bits 0-1 = clock select)
-pub fn update_timers<M: Memory>(state: &mut GameBoy<M>, cycles: u32) {
+pub fn update_timers<M: Memory>(state: &mut GameBoy<M>, cycles: u64) {
     use crate::io::{DIV, IF, TAC, TIMA, TMA};
 
     // Update DIV register (increments every 256 cycles = 16384 Hz)
-    // DIV is incremented by internal counter, we track using a simplified approach
-    let div_increments = cycles / 256;
-    if div_increments > 0 {
+    state.div_counter += cycles;
+    if state.div_counter >= 256 {
+        let div_increments = state.div_counter / 256;
+        state.div_counter %= 256;
         let current_div = state.read(DIV);
-        state.write(DIV, current_div.wrapping_add(div_increments as u8));
+        // Write directly to MMU to avoid triggering the DIV reset handler
+        state
+            .mmu
+            .write(DIV, current_div.wrapping_add(div_increments as u8));
     }
 
     // Check if timer is enabled (bit 2 of TAC)
@@ -361,25 +466,34 @@ pub fn update_timers<M: Memory>(state: &mut GameBoy<M>, cycles: u32) {
             _ => unreachable!(),
         };
 
-        let tima_increments = cycles / cycles_per_increment;
-        if tima_increments > 0 {
-            let mut tima = state.read(TIMA);
+        // Add cycles to counter
+        state.tima_counter += cycles;
 
-            for _ in 0..tima_increments {
-                tima = tima.wrapping_add(1);
+        // Check if we need to increment TIMA
+        if state.tima_counter >= cycles_per_increment {
+            // Calculate how many increments and keep the remainder
+            let increments = state.tima_counter / cycles_per_increment;
+            state.tima_counter %= cycles_per_increment;
 
-                // Check for overflow (wraparound from 0xFF to 0x00)
-                if tima == 0 {
-                    // Reload from TMA
-                    tima = state.read(TMA);
+            // Read current TIMA value
+            let tima = state.read(TIMA);
+            let tma = state.read(TMA);
 
-                    // Request timer interrupt (bit 2 of IF)
-                    let if_flags = state.read(IF);
-                    state.write(IF, if_flags | 0x04);
-                }
+            // Check if overflow will occur
+            let will_overflow = (tima as u64 + increments) > 0xFF;
+
+            if will_overflow {
+                // If we overflow, reload from TMA
+                // The actual hardware reloads TMA after overflow, not the wrapped value
+                state.write(TIMA, tma);
+
+                // Set timer interrupt flag
+                let if_flags = state.read(IF);
+                state.write(IF, if_flags | 0x04);
+            } else {
+                // No overflow, just update TIMA
+                state.write(TIMA, tima.wrapping_add(increments as u8));
             }
-
-            state.write(TIMA, tima);
         }
     }
 }
