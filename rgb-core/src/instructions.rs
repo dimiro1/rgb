@@ -1164,6 +1164,85 @@ fn swap_hl_indirect(state: &mut State) {
     state.write(addr, result);
 }
 
+/// SRL - Shift Right Logical
+/// Shifts value right, bit 0 goes to carry, bit 7 becomes 0
+fn srl_byte(value: u8, state: &mut State) -> u8 {
+    let bit0 = (value & 0x01) != 0;
+    let result = value >> 1;
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(false);
+    state.set_flag_h(false);
+    state.set_flag_c(bit0);
+
+    result
+}
+
+/// Shift register A right logical
+fn srl_a(state: &mut State) {
+    state.a = srl_byte(state.a, state);
+}
+
+/// Shift register B right logical
+fn srl_b(state: &mut State) {
+    state.b = srl_byte(state.b, state);
+}
+
+/// Shift register C right logical
+fn srl_c(state: &mut State) {
+    state.c = srl_byte(state.c, state);
+}
+
+/// Shift register D right logical
+fn srl_d(state: &mut State) {
+    state.d = srl_byte(state.d, state);
+}
+
+/// Shift register E right logical
+fn srl_e(state: &mut State) {
+    state.e = srl_byte(state.e, state);
+}
+
+/// Shift register H right logical
+fn srl_h(state: &mut State) {
+    state.h = srl_byte(state.h, state);
+}
+
+/// Shift register L right logical
+fn srl_l(state: &mut State) {
+    state.l = srl_byte(state.l, state);
+}
+
+/// Shift value at (HL) right logical
+fn srl_hl_indirect(state: &mut State) {
+    let addr = state.hl();
+    let value = state.read(addr);
+    let result = srl_byte(value, state);
+    state.write(addr, result);
+}
+
+/// BIT - Test bit in value
+/// Tests if a specific bit is set, sets Z flag if bit is 0
+fn bit_test(value: u8, bit: u8, state: &mut State) {
+    let bit_set = (value & (1 << bit)) != 0;
+    state.set_flag_z(!bit_set);
+    state.set_flag_n(false);
+    state.set_flag_h(true); // BIT always sets H flag
+    // C flag is not affected
+}
+
+/// RES - Reset (clear) bit in value
+/// Clears a specific bit in the value, returns the result
+fn res_bit(value: u8, bit: u8) -> u8 {
+    value & !(1 << bit)
+}
+
+/// SET - Set bit in value
+/// Sets a specific bit in the value, returns the result
+fn set_bit(value: u8, bit: u8) -> u8 {
+    value | (1 << bit)
+}
+
 /// JR - Jump relative (unconditional)
 /// Adds a signed 8-bit offset to PC
 fn jr(state: &mut State) {
@@ -1443,7 +1522,7 @@ pub fn execute(state: &mut State) {
         }
         0x0B => {
             /* DEC BC */
-            state.set_bc(state.bc().wrapping_sub(1));
+            dec_bc(state);
             state.cycles += 8;
         }
         0x0C => {
@@ -2701,8 +2780,134 @@ pub fn execute(state: &mut State) {
                     swap_a(state);
                     state.cycles += 8;
                 }
-                _ => {
-                    panic!("Unimplemented CB opcode: 0x{:02X}", cb_op);
+                0x38 => {
+                    /* SRL B */
+                    srl_b(state);
+                    state.cycles += 8;
+                }
+                0x39 => {
+                    /* SRL C */
+                    srl_c(state);
+                    state.cycles += 8;
+                }
+                0x3A => {
+                    /* SRL D */
+                    srl_d(state);
+                    state.cycles += 8;
+                }
+                0x3B => {
+                    /* SRL E */
+                    srl_e(state);
+                    state.cycles += 8;
+                }
+                0x3C => {
+                    /* SRL H */
+                    srl_h(state);
+                    state.cycles += 8;
+                }
+                0x3D => {
+                    /* SRL L */
+                    srl_l(state);
+                    state.cycles += 8;
+                }
+                0x3E => {
+                    /* SRL (HL) */
+                    srl_hl_indirect(state);
+                    state.cycles += 16;
+                }
+                0x3F => {
+                    /* SRL A */
+                    srl_a(state);
+                    state.cycles += 8;
+                }
+                // BIT instructions (0x40-0x7F) - Test bit b in register r
+                // Pattern: 0b01bbbrrr where bbb = bit (0-7), rrr = register
+                0x40..=0x7F => {
+                    let bit = (cb_op >> 3) & 0x07; // Extract bit number (bits 3-5)
+                    let reg = cb_op & 0x07; // Extract register index (bits 0-2)
+
+                    let value = match reg {
+                        0 => state.b,
+                        1 => state.c,
+                        2 => state.d,
+                        3 => state.e,
+                        4 => state.h,
+                        5 => state.l,
+                        6 => state.read(state.hl()), // (HL)
+                        7 => state.a,
+                        _ => unreachable!(),
+                    };
+
+                    bit_test(value, bit, state);
+                    state.cycles += if reg == 6 { 12 } else { 8 }; // (HL) takes 12 cycles, others 8
+                }
+                // RES instructions (0x80-0xBF) - Reset (clear) bit b in register r
+                // Pattern: 0b10bbbrrr where bbb = bit (0-7), rrr = register
+                0x80..=0xBF => {
+                    let bit = (cb_op >> 3) & 0x07; // Extract bit number (bits 3-5)
+                    let reg = cb_op & 0x07; // Extract register index (bits 0-2)
+
+                    let value = match reg {
+                        0 => state.b,
+                        1 => state.c,
+                        2 => state.d,
+                        3 => state.e,
+                        4 => state.h,
+                        5 => state.l,
+                        6 => state.read(state.hl()), // (HL)
+                        7 => state.a,
+                        _ => unreachable!(),
+                    };
+
+                    let result = res_bit(value, bit);
+
+                    match reg {
+                        0 => state.b = result,
+                        1 => state.c = result,
+                        2 => state.d = result,
+                        3 => state.e = result,
+                        4 => state.h = result,
+                        5 => state.l = result,
+                        6 => state.write(state.hl(), result), // (HL)
+                        7 => state.a = result,
+                        _ => unreachable!(),
+                    }
+
+                    state.cycles += if reg == 6 { 16 } else { 8 }; // (HL) takes 16 cycles, others 8
+                }
+                // SET instructions (0xC0-0xFF) - Set bit b in register r
+                // Pattern: 0b11bbbrrr where bbb = bit (0-7), rrr = register
+                0xC0..=0xFF => {
+                    let bit = (cb_op >> 3) & 0x07; // Extract bit number (bits 3-5)
+                    let reg = cb_op & 0x07; // Extract register index (bits 0-2)
+
+                    let value = match reg {
+                        0 => state.b,
+                        1 => state.c,
+                        2 => state.d,
+                        3 => state.e,
+                        4 => state.h,
+                        5 => state.l,
+                        6 => state.read(state.hl()), // (HL)
+                        7 => state.a,
+                        _ => unreachable!(),
+                    };
+
+                    let result = set_bit(value, bit);
+
+                    match reg {
+                        0 => state.b = result,
+                        1 => state.c = result,
+                        2 => state.d = result,
+                        3 => state.e = result,
+                        4 => state.h = result,
+                        5 => state.l = result,
+                        6 => state.write(state.hl(), result), // (HL)
+                        7 => state.a = result,
+                        _ => unreachable!(),
+                    }
+
+                    state.cycles += if reg == 6 { 16 } else { 8 }; // (HL) takes 16 cycles, others 8
                 }
             }
         }
@@ -5082,6 +5287,189 @@ mod tests {
 
         assert_eq!(state.read(0xF900), 0x65);
         assert!(!state.flag_c()); // SWAP always clears carry
+    }
+
+    #[test]
+    fn test_srl_hl_indirect() {
+        let mut state = State::new();
+        state.set_hl(0xFA00);
+        state.write(0xFA00, 0b1001_0100); // 0x94
+
+        srl_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xFA00), 0b0100_1010); // 0x4A - bit 7 becomes 0
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 0 was 0
+    }
+
+    #[test]
+    fn test_srl_hl_indirect_clears_bit7() {
+        let mut state = State::new();
+        state.set_hl(0xFB00);
+        state.write(0xFB00, 0b1111_1110); // 0xFE - negative number
+
+        srl_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xFB00), 0b0111_1111); // 0x7F - bit 7 becomes 0 (unlike SRA)
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // Bit 0 was 0
+    }
+
+    #[test]
+    fn test_srl_hl_indirect_sets_carry() {
+        let mut state = State::new();
+        state.set_hl(0xFC00);
+        state.write(0xFC00, 0b0101_0101); // 0x55
+
+        srl_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xFC00), 0b0010_1010); // 0x2A - bit 0 shifted out
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_srl_hl_indirect_zero_result() {
+        let mut state = State::new();
+        state.set_hl(0xFD00);
+        state.write(0xFD00, 0x01); // Only bit 0 set
+
+        srl_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xFD00), 0x00); // Shifted to 0
+        assert!(state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_srl_hl_indirect_all_ones() {
+        let mut state = State::new();
+        state.set_hl(0xFE00);
+        state.write(0xFE00, 0xFF);
+
+        srl_hl_indirect(&mut state);
+
+        assert_eq!(state.read(0xFE00), 0x7F); // 0xFF >> 1 = 0x7F (bit 7 becomes 0)
+        assert!(!state.flag_z());
+        assert!(!state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Bit 0 was 1
+    }
+
+    #[test]
+    fn test_bit_test_bit_set() {
+        let mut state = State::new();
+        let value = 0b0100_1010; // Bits 1, 3, 6 are set
+
+        bit_test(value, 1, &mut state);
+        assert!(!state.flag_z()); // Bit 1 is set, so Z = 0
+        assert!(!state.flag_n());
+        assert!(state.flag_h());
+    }
+
+    #[test]
+    fn test_bit_test_bit_clear() {
+        let mut state = State::new();
+        let value = 0b0100_1010; // Bits 0, 2, 4, 5, 7 are clear
+
+        bit_test(value, 0, &mut state);
+        assert!(state.flag_z()); // Bit 0 is clear, so Z = 1
+        assert!(!state.flag_n());
+        assert!(state.flag_h());
+    }
+
+    #[test]
+    fn test_bit_test_all_bits() {
+        let mut state = State::new();
+        let value = 0b1010_1010; // Bits 1, 3, 5, 7 are set
+
+        for bit in 0..8 {
+            bit_test(value, bit, &mut state);
+            if bit % 2 == 1 {
+                assert!(!state.flag_z()); // Odd bits are set
+            } else {
+                assert!(state.flag_z()); // Even bits are clear
+            }
+            assert!(state.flag_h());
+            assert!(!state.flag_n());
+        }
+    }
+
+    #[test]
+    fn test_bit_test_preserves_carry() {
+        let mut state = State::new();
+        state.set_flag_c(true);
+        let value = 0b0000_0001;
+
+        bit_test(value, 0, &mut state);
+        assert!(state.flag_c()); // Carry should be preserved
+    }
+
+    #[test]
+    fn test_bit_test_bit_7() {
+        let mut state = State::new();
+        let value = 0x80; // Only bit 7 set
+
+        bit_test(value, 7, &mut state);
+        assert!(!state.flag_z()); // Bit 7 is set
+        assert!(state.flag_h());
+        assert!(!state.flag_n());
+    }
+
+    #[test]
+    fn test_res_bit() {
+        assert_eq!(res_bit(0b1111_1111, 0), 0b1111_1110); // Clear bit 0
+        assert_eq!(res_bit(0b1111_1111, 3), 0b1111_0111); // Clear bit 3
+        assert_eq!(res_bit(0b1111_1111, 7), 0b0111_1111); // Clear bit 7
+        assert_eq!(res_bit(0b1010_1010, 1), 0b1010_1000); // Clear bit 1 (was set)
+        assert_eq!(res_bit(0b1010_1010, 0), 0b1010_1010); // Clear bit 0 (already clear)
+    }
+
+    #[test]
+    fn test_res_bit_all_bits() {
+        let value = 0xFF;
+        for bit in 0..8 {
+            let result = res_bit(value, bit);
+            assert_eq!(result, 0xFF & !(1 << bit));
+        }
+    }
+
+    #[test]
+    fn test_set_bit() {
+        assert_eq!(set_bit(0b0000_0000, 0), 0b0000_0001); // Set bit 0
+        assert_eq!(set_bit(0b0000_0000, 3), 0b0000_1000); // Set bit 3
+        assert_eq!(set_bit(0b0000_0000, 7), 0b1000_0000); // Set bit 7
+        assert_eq!(set_bit(0b0101_0101, 1), 0b0101_0111); // Set bit 1 (was clear)
+        assert_eq!(set_bit(0b0101_0101, 0), 0b0101_0101); // Set bit 0 (already set)
+    }
+
+    #[test]
+    fn test_set_bit_all_bits() {
+        let value = 0x00;
+        for bit in 0..8 {
+            let result = set_bit(value, bit);
+            assert_eq!(result, 1 << bit);
+        }
+    }
+
+    #[test]
+    fn test_res_set_complementary() {
+        // RES and SET are complementary operations
+        // Start with all bits set, then RES should clear, SET should restore
+        let value = 0xFF;
+        for bit in 0..8 {
+            let cleared = res_bit(value, bit);
+            let set_again = set_bit(cleared, bit);
+            assert_eq!(set_again, value);
+        }
     }
 
     #[test]
