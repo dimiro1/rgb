@@ -181,6 +181,23 @@ fn or_a(value: u8, state: &mut State) {
     state.a = result;
 }
 
+/// Compare an 8-bit value with register A (like SUB but doesn't store result)
+/// Z: Set if A == value (result is zero)
+/// N: Set (subtraction operation)
+/// H: Set if borrow from bit 4
+/// C: Set if borrow (A < value)
+fn cp_a(value: u8, state: &mut State) {
+    let a = state.a;
+    let result = a.wrapping_sub(value);
+
+    state.set_flag_z(result == 0);
+    state.set_flag_n(true);
+    state.set_flag_h((a & 0xF) < (value & 0xF));
+    state.set_flag_c(a < value);
+
+    // Note: A register is NOT modified (that's the difference from SUB)
+}
+
 /// Increment an 8-bit value by 1 and update flags accordingly
 fn inc_8bit(value: u8, state: &mut State) -> u8 {
     let result = value.wrapping_add(1);
@@ -1677,6 +1694,47 @@ pub fn execute(state: &mut State) {
             or_a(state.a, state);
             state.cycles += 4;
         }
+        0xB8 => {
+            /* CP B */
+            cp_a(state.b, state);
+            state.cycles += 4;
+        }
+        0xB9 => {
+            /* CP C */
+            cp_a(state.c, state);
+            state.cycles += 4;
+        }
+        0xBA => {
+            /* CP D */
+            cp_a(state.d, state);
+            state.cycles += 4;
+        }
+        0xBB => {
+            /* CP E */
+            cp_a(state.e, state);
+            state.cycles += 4;
+        }
+        0xBC => {
+            /* CP H */
+            cp_a(state.h, state);
+            state.cycles += 4;
+        }
+        0xBD => {
+            /* CP L */
+            cp_a(state.l, state);
+            state.cycles += 4;
+        }
+        0xBE => {
+            /* CP (HL) */
+            let value = state.read(state.hl());
+            cp_a(value, state);
+            state.cycles += 8;
+        }
+        0xBF => {
+            /* CP A */
+            cp_a(state.a, state);
+            state.cycles += 4;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
@@ -2258,6 +2316,91 @@ mod tests {
         assert!(!state.flag_n()); // N cleared
         assert!(!state.flag_h()); // H cleared
         assert!(!state.flag_c()); // C cleared
+    }
+
+    // Tests for CP A,r (compare)
+    #[test]
+    fn test_cp_a_equal() {
+        let mut state = State::new();
+        state.a = 0x42;
+
+        cp_a(0x42, &mut state);
+
+        assert_eq!(state.a, 0x42); // A unchanged
+        assert!(state.flag_z()); // Equal (A == value)
+        assert!(state.flag_n()); // Subtraction
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_cp_a_greater_than() {
+        let mut state = State::new();
+        state.a = 0x50;
+
+        cp_a(0x30, &mut state);
+
+        assert_eq!(state.a, 0x50); // A unchanged
+        assert!(!state.flag_z()); // Not equal
+        assert!(state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c()); // No borrow (A > value)
+    }
+
+    #[test]
+    fn test_cp_a_less_than() {
+        let mut state = State::new();
+        state.a = 0x30;
+
+        cp_a(0x50, &mut state);
+
+        assert_eq!(state.a, 0x30); // A unchanged
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(!state.flag_h());
+        assert!(state.flag_c()); // Borrow (A < value)
+    }
+
+    #[test]
+    fn test_cp_a_half_borrow() {
+        let mut state = State::new();
+        state.a = 0x3E;
+
+        cp_a(0x0F, &mut state);
+
+        assert_eq!(state.a, 0x3E); // A unchanged
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(state.flag_h()); // Half borrow: 0xE < 0xF
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_cp_a_with_zero() {
+        let mut state = State::new();
+        state.a = 0x00;
+
+        cp_a(0x00, &mut state);
+
+        assert_eq!(state.a, 0x00); // A unchanged
+        assert!(state.flag_z()); // 0 == 0
+        assert!(state.flag_n());
+        assert!(!state.flag_h());
+        assert!(!state.flag_c());
+    }
+
+    #[test]
+    fn test_cp_a_underflow() {
+        let mut state = State::new();
+        state.a = 0x00;
+
+        cp_a(0x01, &mut state);
+
+        assert_eq!(state.a, 0x00); // A unchanged (important!)
+        assert!(!state.flag_z());
+        assert!(state.flag_n());
+        assert!(state.flag_h()); // Half borrow
+        assert!(state.flag_c()); // Borrow
     }
 
     #[test]
