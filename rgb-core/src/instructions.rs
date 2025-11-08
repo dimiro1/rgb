@@ -1227,6 +1227,51 @@ pub fn execute(state: &mut State) {
             }
             state.cycles += 4;
         }
+        0x77 => {
+            /* LD (HL),A */
+            state.write(state.hl(), state.a);
+            state.cycles += 8;
+        }
+        0x78 => {
+            /* LD A,B */
+            state.a = state.b;
+            state.cycles += 4;
+        }
+        0x79 => {
+            /* LD A,C */
+            state.a = state.c;
+            state.cycles += 4;
+        }
+        0x7A => {
+            /* LD A,D */
+            state.a = state.d;
+            state.cycles += 4;
+        }
+        0x7B => {
+            /* LD A,E */
+            state.a = state.e;
+            state.cycles += 4;
+        }
+        0x7C => {
+            /* LD A,H */
+            state.a = state.h;
+            state.cycles += 4;
+        }
+        0x7D => {
+            /* LD A,L */
+            state.a = state.l;
+            state.cycles += 4;
+        }
+        0x7E => {
+            /* LD A,(HL) */
+            state.a = state.read(state.hl());
+            state.cycles += 8;
+        }
+        0x7F => {
+            /* LD A,A */
+            // No-op, but still takes cycles
+            state.cycles += 4;
+        }
         _ => {
             panic!("Unimplemented opcode: 0x{:02X}", op);
         }
