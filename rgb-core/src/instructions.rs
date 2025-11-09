@@ -614,15 +614,14 @@ fn handle_delayed_ime<M: Memory>(state: &mut GameBoy<M>) {
 /// Handle HALT mode processing at the beginning of instruction execution
 ///
 /// This function handles both:
-/// 1. HALT bug: Adjusts PC when halt_bug flag is set
+/// 1. HALT bug: No special handling here (handled in execute function)
 /// 2. HALT exit: Checks if CPU should exit HALT mode due to interrupts
 ///
 /// Returns true if instruction execution should continue, false if CPU is halted
 ///
-/// HALT bug behavior (halt_bug = true):
-///   - Decrements PC to cause next byte to be read twice
-///   - Clears halt_bug flag
-///   - Continues execution
+/// HALT bug behavior:
+///   - The halt_bug flag tells execute() to not increment PC after reading opcode
+///   - This causes the byte after HALT to be executed as both opcode and operand
 ///
 /// HALT mode behavior (halt = true):
 ///   - If pending interrupt exists: exits HALT, continues execution
@@ -631,13 +630,8 @@ fn handle_delayed_ime<M: Memory>(state: &mut GameBoy<M>) {
 /// Not halted:
 ///   - Returns true to continue normal execution
 fn handle_halt<M: Memory>(state: &mut GameBoy<M>) -> bool {
-    // Handle HALT bug: PC should not increment after HALT when bug is triggered
-    // This causes the next instruction byte to be read twice
-    if state.halt_bug {
-        state.halt_bug = false;
-        state.pc = state.pc.wrapping_sub(1); // Undo the PC increment from HALT instruction
-        return true; // Continue execution (next byte will be read again)
-    }
+    // HALT bug is handled in execute() function, not here
+    // We just need to handle normal HALT mode
 
     // Handle HALT mode exit
     if state.halt {
@@ -653,7 +647,7 @@ fn handle_halt<M: Memory>(state: &mut GameBoy<M>) -> bool {
         }
     }
 
-    // Not halted, continue normal execution
+    // Not halted (or halt_bug is set), continue normal execution
     true
 }
 
@@ -1475,7 +1469,17 @@ pub fn execute<M: Memory>(state: &mut GameBoy<M>) {
         return;
     }
 
-    let op = read_immediate_byte(state);
+    // Handle HALT bug: Read opcode without incrementing PC if halt_bug is set
+    let op = if state.halt_bug {
+        // HALT bug: Read the byte without incrementing PC
+        // This causes the byte after HALT to be read twice
+        let value = state.read(state.pc);
+        state.halt_bug = false; // Clear the flag after first read
+        value
+    } else {
+        // Normal read: increments PC
+        read_immediate_byte(state)
+    };
     state.last_opcode = op; // Store for delayed interrupt handling
 
     match op {
@@ -7095,8 +7099,9 @@ mod tests {
         let should_continue = handle_halt(&mut state);
 
         assert!(should_continue); // Should continue execution
-        assert!(!state.halt_bug); // Flag cleared
-        assert_eq!(state.pc, 0xFF); // PC decremented (100 - 1 = FF)
+        // Note: halt_bug flag is now cleared in execute(), not in handle_halt()
+        assert!(state.halt_bug); // Flag NOT cleared here
+        assert_eq!(state.pc, 0x100); // PC not modified
     }
 
     #[test]
@@ -7109,8 +7114,8 @@ mod tests {
         let should_continue = handle_halt(&mut state);
 
         assert!(should_continue);
-        assert!(!state.halt_bug);
-        assert_eq!(state.pc, 0xFFFF); // Wrapping: 0000 - 1 = FFFF
+        assert!(state.halt_bug); // Flag NOT cleared here
+        assert_eq!(state.pc, 0x0000); // PC not modified
     }
 
     #[test]
@@ -7161,11 +7166,12 @@ mod tests {
 
         let should_continue = handle_halt(&mut state);
 
-        // HALT bug is handled first (checked before halt mode)
+        // With the new implementation, halt mode is checked first
+        // Since there's a pending interrupt, HALT mode exits
         assert!(should_continue);
-        assert!(!state.halt_bug); // Bug flag cleared
-        assert!(state.halt); // HALT flag NOT touched (bug takes priority)
-        assert_eq!(state.pc, 0x1FF); // PC decremented
+        assert!(state.halt_bug); // Bug flag NOT cleared in handle_halt
+        assert!(!state.halt); // HALT mode exited due to pending interrupt
+        assert_eq!(state.pc, 0x200); // PC not modified
     }
 
     #[test]
