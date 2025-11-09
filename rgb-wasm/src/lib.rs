@@ -1,5 +1,6 @@
 use rgb_core::{
     cartridge::Cartridge,
+    joypad::Button,
     ppu::{Framebuffer, SCREEN_HEIGHT, SCREEN_WIDTH},
     system::GameBoy,
 };
@@ -166,6 +167,40 @@ impl Emulator {
         self.ctx.put_image_data(&image_data, 0.0, 0.0)?;
 
         Ok(())
+    }
+
+    pub fn key_down(&mut self, button: u8) {
+        if let Some(ref mut gameboy) = self.gameboy {
+            let btn = match button {
+                0 => Button::Right,
+                1 => Button::Left,
+                2 => Button::Up,
+                3 => Button::Down,
+                4 => Button::A,
+                5 => Button::B,
+                6 => Button::Select,
+                7 => Button::Start,
+                _ => return,
+            };
+            gameboy.joypad.press(btn);
+        }
+    }
+
+    pub fn key_up(&mut self, button: u8) {
+        if let Some(ref mut gameboy) = self.gameboy {
+            let btn = match button {
+                0 => Button::Right,
+                1 => Button::Left,
+                2 => Button::Up,
+                3 => Button::Down,
+                4 => Button::A,
+                5 => Button::B,
+                6 => Button::Select,
+                7 => Button::Start,
+                _ => return,
+            };
+            gameboy.joypad.release(btn);
+        }
     }
 }
 

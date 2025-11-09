@@ -401,6 +401,8 @@ impl Ppu {
         let sprite_height = self.sprite_size();
         let line = self.ly as i16;
 
+        let mut candidates = Vec::with_capacity(40);
+
         for i in 0..40 {
             let oam_addr = i * 4;
             let y = oam[oam_addr] as i16 - 16;
@@ -409,17 +411,19 @@ impl Ppu {
             let attributes = oam[oam_addr + 3];
 
             if line >= y && line < y + sprite_height as i16 {
-                self.sprite_buffer.push(SpriteData {
+                candidates.push((i, SpriteData {
                     y,
                     x,
                     tile_index,
                     attributes,
-                });
-
-                if self.sprite_buffer.len() >= 10 {
-                    break;
-                }
+                }));
             }
+        }
+
+        candidates.sort_by_key(|(oam_index, sprite)| (sprite.x, *oam_index));
+
+        for (_, sprite) in candidates.into_iter().take(10) {
+            self.sprite_buffer.push(sprite);
         }
     }
 

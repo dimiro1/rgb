@@ -153,7 +153,13 @@
                 transition: all 0.1s;
             }
 
-            .dpad-btn:active {
+            .dpad-btn.disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+            .dpad-btn:active,
+            .dpad-btn.pressed {
                 transform: translateY(2px);
                 box-shadow:
                     0 1px 0 #1c1c18,
@@ -215,7 +221,8 @@
                 text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
             }
 
-            .small-btn:active {
+            .small-btn:active,
+            .small-btn.pressed {
                 transform: translateY(2px);
                 box-shadow:
                     0 1px 0 #2c2c24,
@@ -253,7 +260,8 @@
                 text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
             }
 
-            .action-btn:active {
+            .action-btn:active,
+            .action-btn.pressed {
                 transform: translateY(3px);
                 box-shadow:
                     0 1px 0 #892c1d,
@@ -327,6 +335,48 @@
                     inset 0 1px 0 rgba(255, 255, 255, 0.2);
             }
 
+            /* Controls Info */
+            .controls-info {
+                margin-top: 20px;
+                padding: 15px;
+                background: rgba(60, 60, 52, 0.1);
+                border-radius: 8px;
+            }
+
+            .info-title {
+                text-align: center;
+                font-size: 0.4em;
+                color: #4c4c44;
+                letter-spacing: 3px;
+                margin-bottom: 10px;
+            }
+
+            .info-grid {
+                display: flex;
+                flex-direction: column;
+                gap: 5px;
+                margin-bottom: 10px;
+            }
+
+            .info-item {
+                display: flex;
+                justify-content: space-between;
+                font-size: 0.3em;
+                color: #5c5c50;
+                padding: 5px 10px;
+                background: rgba(255, 255, 255, 0.1);
+                border-radius: 3px;
+            }
+
+            .info-item span:first-child {
+                font-weight: bold;
+            }
+
+            #customize-keys {
+                width: 100%;
+                margin-top: 5px;
+            }
+
             /* Bottom branding */
             .footer {
                 text-align: center;
@@ -366,26 +416,26 @@
             <div class="controls">
                 <!-- D-Pad -->
                 <div class="dpad">
-                    <div class="dpad-btn dpad-up"></div>
-                    <div class="dpad-btn dpad-down"></div>
-                    <div class="dpad-btn dpad-left"></div>
-                    <div class="dpad-btn dpad-right"></div>
+                    <div class="dpad-btn dpad-up disabled" id="btn-up"></div>
+                    <div class="dpad-btn dpad-down disabled" id="btn-down"></div>
+                    <div class="dpad-btn dpad-left disabled" id="btn-left"></div>
+                    <div class="dpad-btn dpad-right disabled" id="btn-right"></div>
                     <div class="dpad-btn dpad-center"></div>
                 </div>
 
                 <!-- Start/Select -->
                 <div class="middle-buttons">
                     <div class="start-select">
-                        <button class="small-btn">SELECT</button>
-                        <button class="small-btn" id="start-btn" disabled>START</button>
+                        <button class="small-btn" id="btn-select" disabled>SELECT</button>
+                        <button class="small-btn" id="btn-start" disabled>START</button>
                     </div>
                     <button class="small-btn" id="reset-btn" disabled>RESET</button>
                 </div>
 
                 <!-- A/B Buttons -->
                 <div class="ab-buttons">
-                    <button class="action-btn btn-b">B</button>
-                    <button class="action-btn btn-a">A</button>
+                    <button class="action-btn btn-b" id="btn-b" disabled>B</button>
+                    <button class="action-btn btn-a" id="btn-a" disabled>A</button>
                 </div>
             </div>
 
@@ -407,6 +457,34 @@
                 </label>
             </div>
 
+            <!-- Controls Info -->
+            <div class="controls-info">
+                <div class="info-title">CONTROLS</div>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span>ARROWS</span>
+                        <span>D-PAD</span>
+                    </div>
+                    <div class="info-item">
+                        <span id="key-a">X</span>
+                        <span>A</span>
+                    </div>
+                    <div class="info-item">
+                        <span id="key-b">Z</span>
+                        <span>B</span>
+                    </div>
+                    <div class="info-item">
+                        <span id="key-select">BACKSPACE</span>
+                        <span>SELECT</span>
+                    </div>
+                    <div class="info-item">
+                        <span id="key-start">ENTER</span>
+                        <span>START</span>
+                    </div>
+                </div>
+                <button class="small-btn" id="customize-keys">CUSTOMIZE</button>
+            </div>
+
             <!-- Footer -->
             <div class="footer">© 1989 NINTENDO</div>
         </div>
@@ -419,9 +497,19 @@
 
             // DOM elements
             const romInput = document.getElementById("rom-input");
-            const startBtn = document.getElementById("start-btn");
+            const startBtn = document.getElementById("btn-start");
             const resetBtn = document.getElementById("reset-btn");
             const powerLed = document.getElementById("power-led");
+
+            // Game buttons
+            const btnUp = document.getElementById("btn-up");
+            const btnDown = document.getElementById("btn-down");
+            const btnLeft = document.getElementById("btn-left");
+            const btnRight = document.getElementById("btn-right");
+            const btnA = document.getElementById("btn-a");
+            const btnB = document.getElementById("btn-b");
+            const btnSelect = document.getElementById("btn-select");
+            const btnStart = document.getElementById("btn-start");
 
             // Initialize WASM
             async function initEmulator() {
@@ -446,6 +534,13 @@
                     emulator.load_rom(romData);
                     startBtn.disabled = false;
                     resetBtn.disabled = false;
+                    btnSelect.disabled = false;
+                    btnA.disabled = false;
+                    btnB.disabled = false;
+                    btnUp.classList.remove("disabled");
+                    btnDown.classList.remove("disabled");
+                    btnLeft.classList.remove("disabled");
+                    btnRight.classList.remove("disabled");
 
                     console.log("ROM loaded:", file.name);
                 } catch (err) {
@@ -500,6 +595,140 @@
                 }
                 loop();
             }
+
+            // Default key mappings (can be customized)
+            const keyMap = {
+                'ArrowRight': 0,  // Right
+                'ArrowLeft': 1,   // Left
+                'ArrowUp': 2,     // Up
+                'ArrowDown': 3,   // Down
+                'KeyX': 4,        // A
+                'KeyZ': 5,        // B
+                'Backspace': 6,   // Select
+                'Enter': 7        // Start
+            };
+
+            // Track pressed keys to avoid repeats
+            const pressedKeys = new Set();
+
+            // Key customization state
+            const customizeBtn = document.getElementById("customize-keys");
+            let isCustomizing = false;
+            let customizingButton = null;
+
+            customizeBtn.addEventListener("click", () => {
+                if (!isCustomizing) {
+                    isCustomizing = true;
+                    customizeBtn.textContent = "Press key for A...";
+                    customizingButton = 'a';
+                }
+            });
+
+            // Unified keyboard handler
+            window.addEventListener("keydown", (e) => {
+                if (isCustomizing) {
+                    e.preventDefault();
+
+                    const oldKey = Object.keys(keyMap).find(key => keyMap[key] === getButtonId(customizingButton));
+                    if (oldKey) delete keyMap[oldKey];
+
+                    keyMap[e.code] = getButtonId(customizingButton);
+                    updateKeyDisplay(customizingButton, formatKeyName(e.code));
+
+                    const nextButton = getNextButton(customizingButton);
+                    if (nextButton) {
+                        customizingButton = nextButton;
+                        customizeBtn.textContent = `Press key for ${nextButton.toUpperCase()}...`;
+                    } else {
+                        isCustomizing = false;
+                        customizingButton = null;
+                        customizeBtn.textContent = "CUSTOMIZE";
+                    }
+                    return;
+                }
+
+                const buttonId = keyMap[e.code];
+                if (buttonId !== undefined && emulator && !pressedKeys.has(e.code)) {
+                    e.preventDefault();
+                    pressedKeys.add(e.code);
+                    emulator.key_down(buttonId);
+                }
+            });
+
+            window.addEventListener("keyup", (e) => {
+                const buttonId = keyMap[e.code];
+                if (buttonId !== undefined && emulator) {
+                    e.preventDefault();
+                    pressedKeys.delete(e.code);
+                    emulator.key_up(buttonId);
+                }
+            });
+
+            function getButtonId(name) {
+                const map = { 'a': 4, 'b': 5, 'select': 6, 'start': 7 };
+                return map[name];
+            }
+
+            function getNextButton(current) {
+                const order = ['a', 'b', 'select', 'start'];
+                const index = order.indexOf(current);
+                return index >= 0 && index < order.length - 1 ? order[index + 1] : null;
+            }
+
+            function updateKeyDisplay(button, keyName) {
+                const element = document.getElementById(`key-${button}`);
+                if (element) element.textContent = keyName;
+            }
+
+            function formatKeyName(code) {
+                if (code.startsWith('Key')) return code.replace('Key', '');
+                if (code.startsWith('Digit')) return code.replace('Digit', '');
+                if (code.startsWith('Arrow')) return code.replace('Arrow', '').toUpperCase();
+                if (code === 'Space') return 'SPACE';
+                if (code === 'Backspace') return 'BACKSPACE';
+                if (code === 'Enter') return 'ENTER';
+                return code;
+            }
+
+            // Button handlers helper
+            function setupButton(element, buttonId) {
+                if (!element) return;
+
+                const isDisabled = () => element.disabled || element.classList.contains("disabled");
+
+                const handlePress = (e) => {
+                    e.preventDefault();
+                    if (emulator && !isCustomizing && !isDisabled()) {
+                        element.classList.add("pressed");
+                        emulator.key_down(buttonId);
+                    }
+                };
+
+                const handleRelease = (e) => {
+                    e.preventDefault();
+                    element.classList.remove("pressed");
+                    if (emulator && !isCustomizing && !isDisabled()) {
+                        emulator.key_up(buttonId);
+                    }
+                };
+
+                element.addEventListener("mousedown", handlePress);
+                element.addEventListener("mouseup", handleRelease);
+                element.addEventListener("mouseleave", handleRelease);
+                element.addEventListener("touchstart", handlePress);
+                element.addEventListener("touchend", handleRelease);
+                element.addEventListener("touchcancel", handleRelease);
+            }
+
+            // Setup all game buttons
+            setupButton(btnRight, 0);  // Right
+            setupButton(btnLeft, 1);   // Left
+            setupButton(btnUp, 2);     // Up
+            setupButton(btnDown, 3);   // Down
+            setupButton(btnA, 4);      // A
+            setupButton(btnB, 5);      // B
+            setupButton(btnSelect, 6); // Select
+            setupButton(btnStart, 7);  // Start
 
             // Initialize on load
             window.addEventListener("load", initEmulator);

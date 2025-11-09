@@ -1,4 +1,5 @@
 use crate::cartridge::Cartridge;
+use crate::joypad::Joypad;
 use crate::memory::{FlatMemory, Memory};
 use crate::mmu::Mmu;
 use crate::ppu::Ppu;
@@ -39,6 +40,9 @@ pub struct GameBoy<M: Memory = Mmu> {
     // PPU (Picture Processing Unit)
     pub ppu: Ppu,
 
+    // Joypad
+    pub joypad: Joypad,
+
     // Memory (generic over Memory trait)
     pub mmu: M,
 }
@@ -74,6 +78,9 @@ impl GameBoy<Mmu> {
 
             // PPU
             ppu: Ppu::new(),
+
+            // Joypad
+            joypad: Joypad::new(),
 
             // MMU with cartridge
             mmu: Mmu::new(cartridge),
@@ -213,6 +220,9 @@ impl<M: Memory> GameBoy<M> {
             // PPU
             ppu: Ppu::new(),
 
+            // Joypad
+            joypad: Joypad::new(),
+
             mmu: memory,
         }
     }
@@ -222,6 +232,11 @@ impl<M: Memory> GameBoy<M> {
     pub fn read(&self, addr: u16) -> u8 {
         use crate::io::*;
         use crate::ppu::Mode;
+
+        // Intercept joypad register reads
+        if addr == P1 {
+            return self.joypad.read();
+        }
 
         // Intercept PPU register reads
         match addr {
@@ -264,6 +279,12 @@ impl<M: Memory> GameBoy<M> {
     pub fn write(&mut self, addr: u16, value: u8) {
         use crate::io::*;
         use crate::ppu::Mode;
+
+        // Handle joypad register writes
+        if addr == P1 {
+            self.joypad.write(value);
+            return;
+        }
 
         // Handle PPU register writes
         match addr {
@@ -690,8 +711,8 @@ mod tests {
         state.write(0x1234, 0xCD);
         assert_eq!(state.read(0x1234), 0xCD);
 
-        state.write(0xFF00, 0x12);
-        assert_eq!(state.read(0xFF00), 0x12);
+        state.write(0xFF01, 0x12);
+        assert_eq!(state.read(0xFF01), 0x12);
 
         state.write(0xFFFF, 0x34);
         assert_eq!(state.read(0xFFFF), 0x34);
