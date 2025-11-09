@@ -8,6 +8,10 @@ The main goal is to get familiar with Rust and WebAssembly. The frontend will be
 
 This is a work in progress. I have no idea if I'm going to finish it.
 
+## Screenshots
+
+![Tetris running on RGB emulator](imgs/tetris.png)
+
 
 ## AI disclaimer
 
