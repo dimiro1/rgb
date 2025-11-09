@@ -123,6 +123,61 @@ impl GameBoy<Mmu> {
         self.write(WX, 0x00);
         self.write(IE, 0x00);
     }
+
+    /// Handle PPU rendering (OAM scan and scanline rendering)
+    fn handle_ppu_rendering(&mut self) {
+        // Perform OAM scan if requested
+        if self.ppu.should_scan_oam {
+            self.ppu.should_scan_oam = false;
+            self.ppu.scan_oam(self.mmu.oam());
+        }
+
+        // Perform scanline rendering if requested
+        if self.ppu.should_render_scanline {
+            self.ppu.should_render_scanline = false;
+            self.ppu.render_scanline(self.mmu.vram(), self.mmu.oam());
+        }
+    }
+
+    /// Handle PPU interrupts (VBlank and STAT)
+    fn handle_ppu_interrupts(&mut self) {
+        use crate::io::IF;
+
+        let mut if_flags = self.mmu.read(IF);
+
+        // VBlank interrupt (bit 0)
+        if self.ppu.vblank_interrupt {
+            self.ppu.vblank_interrupt = false;
+            if_flags |= 0x01;
+        }
+
+        // STAT interrupt (bit 1)
+        if self.ppu.stat_interrupt {
+            self.ppu.stat_interrupt = false;
+            if_flags |= 0x02;
+        }
+
+        self.mmu.write(IF, if_flags);
+    }
+
+    /// Step the emulator by one CPU instruction (Mmu-specific)
+    ///
+    /// This executes one CPU instruction and updates all subsystems (PPU, timers, etc.)
+    pub fn step_with_ppu(&mut self) {
+        let cycles_before = self.cycles;
+        crate::instructions::execute(self);
+        let cycles_consumed = self.cycles - cycles_before;
+
+        // Update timers/PPU based on cycles consumed by the instruction or interrupt servicing
+        update_timers(self, cycles_consumed);
+        self.ppu.step(cycles_consumed);
+
+        // Handle PPU rendering requests
+        self.handle_ppu_rendering();
+
+        // Handle PPU interrupts
+        self.handle_ppu_interrupts();
+    }
 }
 
 // Generic implementation for all Memory types
@@ -165,11 +220,40 @@ impl<M: Memory> GameBoy<M> {
     /// Read a byte from memory
     #[inline]
     pub fn read(&self, addr: u16) -> u8 {
-        use crate::io::LY;
+        use crate::io::*;
+        use crate::ppu::Mode;
 
         // Intercept PPU register reads
-        if addr == LY {
-            return self.ppu.read_ly();
+        match addr {
+            LCDC => return self.ppu.read_lcdc(),
+            STAT => return self.ppu.read_stat(),
+            SCY => return self.ppu.read_scy(),
+            SCX => return self.ppu.read_scx(),
+            LY => return self.ppu.read_ly(),
+            LYC => return self.ppu.read_lyc(),
+            BGP => return self.ppu.read_bgp(),
+            OBP0 => return self.ppu.read_obp0(),
+            OBP1 => return self.ppu.read_obp1(),
+            WY => return self.ppu.read_wy(),
+            WX => return self.ppu.read_wx(),
+            _ => {}
+        }
+
+        // VRAM access restrictions (blocked during Mode 3 - Pixel Transfer)
+        if (0x8000..=0x9FFF).contains(&addr) {
+            if self.ppu.is_lcd_enabled() && self.ppu.mode() == Mode::PixelTransfer {
+                return 0xFF; // Return 0xFF when VRAM is blocked
+            }
+        }
+
+        // OAM access restrictions (blocked during Mode 2 - OAM Search and Mode 3 - Pixel Transfer)
+        if (0xFE00..=0xFE9F).contains(&addr) {
+            if self.ppu.is_lcd_enabled() {
+                let mode = self.ppu.mode();
+                if mode == Mode::OamSearch || mode == Mode::PixelTransfer {
+                    return 0xFF; // Return 0xFF when OAM is blocked
+                }
+            }
         }
 
         self.mmu.read(addr)
@@ -178,11 +262,52 @@ impl<M: Memory> GameBoy<M> {
     /// Write a byte to memory
     #[inline]
     pub fn write(&mut self, addr: u16, value: u8) {
-        use crate::io::{DIV, LY};
+        use crate::io::*;
+        use crate::ppu::Mode;
 
-        // Handle special I/O register behaviors
+        // Handle PPU register writes
         match addr {
+            LCDC => {
+                self.ppu.write_lcdc(value);
+                return;
+            }
+            STAT => {
+                self.ppu.write_stat(value);
+                return;
+            }
+            SCY => {
+                self.ppu.write_scy(value);
+                return;
+            }
+            SCX => {
+                self.ppu.write_scx(value);
+                return;
+            }
             LY => return, // LY register is read-only, ignore writes
+            LYC => {
+                self.ppu.write_lyc(value);
+                return;
+            }
+            BGP => {
+                self.ppu.write_bgp(value);
+                return;
+            }
+            OBP0 => {
+                self.ppu.write_obp0(value);
+                return;
+            }
+            OBP1 => {
+                self.ppu.write_obp1(value);
+                return;
+            }
+            WY => {
+                self.ppu.write_wy(value);
+                return;
+            }
+            WX => {
+                self.ppu.write_wx(value);
+                return;
+            }
             DIV => {
                 // Writing any value to DIV resets it to 0x00 and resets the internal counter
                 self.mmu.write(addr, 0x00);
@@ -190,6 +315,23 @@ impl<M: Memory> GameBoy<M> {
                 return;
             }
             _ => {}
+        }
+
+        // VRAM access restrictions (blocked during Mode 3 - Pixel Transfer)
+        if (0x8000..=0x9FFF).contains(&addr) {
+            if self.ppu.is_lcd_enabled() && self.ppu.mode() == Mode::PixelTransfer {
+                return; // Ignore writes when VRAM is blocked
+            }
+        }
+
+        // OAM access restrictions (blocked during Mode 2 - OAM Search and Mode 3 - Pixel Transfer)
+        if (0xFE00..=0xFE9F).contains(&addr) {
+            if self.ppu.is_lcd_enabled() {
+                let mode = self.ppu.mode();
+                if mode == Mode::OamSearch || mode == Mode::PixelTransfer {
+                    return; // Ignore writes when OAM is blocked
+                }
+            }
         }
 
         self.mmu.write(addr, value)
@@ -330,6 +472,7 @@ impl<M: Memory> GameBoy<M> {
     /// Step the emulator by one CPU instruction
     ///
     /// This executes one CPU instruction and updates all subsystems (PPU, timers, etc.)
+    /// For testing with generic memory that doesn't support PPU rendering
     pub fn step(&mut self) {
         let cycles_before = self.cycles;
         crate::instructions::execute(self);

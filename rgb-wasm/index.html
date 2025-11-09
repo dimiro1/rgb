@@ -5,53 +5,504 @@
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
         <title>RGB - Game Boy Emulator</title>
         <style>
-            body {
-                font-family: "Courier New", monospace;
-                background-color: #1e1e1e;
-                color: #d4d4d4;
-                padding: 20px;
+            @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+            * {
+                box-sizing: border-box;
                 margin: 0;
+                padding: 0;
             }
-            .container {
-                max-width: 800px;
+
+            body {
+                font-family: 'Press Start 2P', cursive;
+                background: #2c3e50;
+                background-image:
+                    radial-gradient(circle at 20% 50%, rgba(52, 73, 94, 0.2) 0%, transparent 50%),
+                    radial-gradient(circle at 80% 80%, rgba(52, 73, 94, 0.2) 0%, transparent 50%);
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+            }
+
+            .gameboy {
+                width: 600px;
+                background: linear-gradient(145deg, #c4c4b8 0%, #b0b0a0 100%);
+                border-radius: 15px 15px 40px 15px;
+                padding: 30px;
+                box-shadow:
+                    0 20px 60px rgba(0, 0, 0, 0.4),
+                    inset 0 2px 5px rgba(255, 255, 255, 0.3),
+                    inset 0 -3px 8px rgba(0, 0, 0, 0.15);
+                border: 3px solid #9c9c8c;
+                position: relative;
+            }
+
+            /* Header */
+            .header {
+                text-align: center;
+                margin-bottom: 15px;
+            }
+
+            .nintendo-logo {
+                font-size: 0.7em;
+                color: #5c5c50;
+                letter-spacing: 4px;
+                margin-bottom: 5px;
+                text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.3);
+            }
+
+            .gameboy-text {
+                font-size: 0.6em;
+                color: #3c3c34;
+                letter-spacing: 6px;
+                font-style: italic;
+                margin-bottom: 3px;
+            }
+
+            .power-led {
+                width: 8px;
+                height: 8px;
+                background: #ff4444;
+                border-radius: 50%;
+                margin: 8px auto;
+                box-shadow:
+                    inset 0 1px 2px rgba(0, 0, 0, 0.5),
+                    0 0 5px rgba(255, 68, 68, 0.5);
+                position: relative;
+            }
+
+            .power-led.on {
+                background: #44ff44;
+                box-shadow:
+                    inset 0 1px 2px rgba(0, 0, 0, 0.5),
+                    0 0 10px rgba(68, 255, 68, 0.8);
+            }
+
+            /* Screen */
+            .screen-container {
+                background: #0f380f;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 20px;
+                box-shadow:
+                    inset 0 4px 12px rgba(0, 0, 0, 0.8),
+                    inset 0 -2px 6px rgba(255, 255, 255, 0.05);
+                position: relative;
+            }
+
+            .screen-label {
+                position: absolute;
+                top: 5px;
+                left: 50%;
+                transform: translateX(-50%);
+                font-size: 0.45em;
+                color: #0f380f;
+                opacity: 0.3;
+                letter-spacing: 2px;
+            }
+
+            #gameboy-screen {
+                display: block;
                 margin: 0 auto;
+                border: 3px solid #0f380f;
+                border-radius: 3px;
+                image-rendering: pixelated;
+                image-rendering: -webkit-optimize-contrast;
+                image-rendering: crisp-edges;
+                -ms-interpolation-mode: nearest-neighbor;
+                box-shadow: 0 0 20px rgba(139, 172, 15, 0.2);
             }
-            h1 {
-                color: #4ec9b0;
-                border-bottom: 2px solid #4ec9b0;
-                padding-bottom: 10px;
+
+            /* Nintendo Branding */
+            .branding {
+                text-align: center;
+                margin-bottom: 20px;
+                font-size: 0.5em;
+                color: #4c4c44;
+                letter-spacing: 3px;
             }
-            #output {
-                background-color: #252526;
-                border: 1px solid #3e3e42;
-                border-radius: 5px;
-                padding: 15px;
-                min-height: 200px;
-                margin-top: 20px;
-                line-height: 1.6;
+
+            /* Controls */
+            .controls {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 15px;
+                align-items: center;
+                margin-bottom: 20px;
+            }
+
+            /* D-Pad */
+            .dpad {
+                position: relative;
+                width: 100px;
+                height: 100px;
+                justify-self: center;
+            }
+
+            .dpad-btn {
+                position: absolute;
+                background: #3c3c34;
+                width: 32px;
+                height: 32px;
+                cursor: pointer;
+                box-shadow:
+                    0 3px 0 #1c1c18,
+                    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+                transition: all 0.1s;
+            }
+
+            .dpad-btn:active {
+                transform: translateY(2px);
+                box-shadow:
+                    0 1px 0 #1c1c18,
+                    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+            }
+
+            .dpad-up {
+                top: 0;
+                left: 34px;
+                border-radius: 3px 3px 0 0;
+            }
+            .dpad-down {
+                bottom: 0;
+                left: 34px;
+                border-radius: 0 0 3px 3px;
+            }
+            .dpad-left {
+                left: 0;
+                top: 34px;
+                border-radius: 3px 0 0 3px;
+            }
+            .dpad-right {
+                right: 0;
+                top: 34px;
+                border-radius: 0 3px 3px 0;
+            }
+            .dpad-center {
+                top: 34px;
+                left: 34px;
+                background: #2c2c24;
+            }
+
+            /* Start/Select */
+            .middle-buttons {
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
+                align-items: center;
+            }
+
+            .start-select {
+                display: flex;
+                gap: 10px;
+            }
+
+            .small-btn {
+                background: #5c5c50;
+                border: none;
+                padding: 8px 18px;
+                border-radius: 15px;
+                font-size: 0.4em;
+                font-family: 'Press Start 2P', cursive;
+                color: white;
+                cursor: pointer;
+                box-shadow:
+                    0 3px 0 #2c2c24,
+                    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+                transition: all 0.1s;
+                text-shadow: 0 1px 1px rgba(0, 0, 0, 0.5);
+            }
+
+            .small-btn:active {
+                transform: translateY(2px);
+                box-shadow:
+                    0 1px 0 #2c2c24,
+                    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            }
+
+            .small-btn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+            /* A/B Buttons */
+            .ab-buttons {
+                position: relative;
+                width: 115px;
+                height: 90px;
+                justify-self: center;
+            }
+
+            .action-btn {
+                position: absolute;
+                width: 50px;
+                height: 50px;
+                border: none;
+                border-radius: 50%;
+                font-size: 0.65em;
+                font-family: 'Press Start 2P', cursive;
+                cursor: pointer;
+                box-shadow:
+                    0 4px 0 #892c1d,
+                    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+                transition: all 0.1s;
+                background: linear-gradient(145deg, #d94c3d 0%, #c93c2d 100%);
+                color: white;
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+            }
+
+            .action-btn:active {
+                transform: translateY(3px);
+                box-shadow:
+                    0 1px 0 #892c1d,
+                    inset 0 1px 0 rgba(255, 255, 255, 0.3);
+            }
+
+            .btn-a {
+                right: 0;
+                top: 20px;
+            }
+
+            .btn-b {
+                left: 0;
+                top: 0;
+            }
+
+            /* Speaker */
+            .speaker {
+                display: grid;
+                grid-template-columns: repeat(6, 1fr);
+                gap: 4px;
+                margin-bottom: 15px;
+                padding: 10px;
+            }
+
+            .speaker-hole {
+                width: 100%;
+                height: 3px;
+                background: #7c7c70;
+                border-radius: 2px;
+                box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.3);
+            }
+
+            /* File Input */
+            .file-input-container {
+                position: relative;
+                overflow: hidden;
+            }
+
+            .file-input-container input[type="file"] {
+                position: absolute;
+                left: -9999px;
+            }
+
+            .file-input-label {
+                background: linear-gradient(180deg, #7c7c6c 0%, #5c5c50 100%);
+                color: white;
+                padding: 12px 20px;
+                border-radius: 25px;
+                font-size: 0.35em;
+                font-family: 'Press Start 2P', cursive;
+                cursor: pointer;
+                display: block;
+                text-align: center;
+                transition: all 0.1s;
+                letter-spacing: 1px;
+                box-shadow:
+                    0 4px 0 #3c3c30,
+                    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+            }
+
+            .file-input-label:hover {
+                background: linear-gradient(180deg, #8c8c7c 0%, #6c6c60 100%);
+            }
+
+            .file-input-label:active {
+                transform: translateY(3px);
+                box-shadow:
+                    0 1px 0 #3c3c30,
+                    inset 0 1px 0 rgba(255, 255, 255, 0.2);
+            }
+
+            /* Bottom branding */
+            .footer {
+                text-align: center;
+                margin-top: 15px;
+                font-size: 0.25em;
+                color: #6c6c60;
+                letter-spacing: 2px;
+            }
+
+            @media (max-width: 700px) {
+                .gameboy {
+                    width: 100%;
+                    max-width: 600px;
+                }
             }
         </style>
     </head>
     <body>
-        <div class="container">
-            <h1>RGB - Game Boy Emulator</h1>
+        <div class="gameboy">
+            <!-- Header -->
+            <div class="header">
+                <div class="nintendo-logo">NINTENDO</div>
+                <div class="gameboy-text">GAME BOY™</div>
+                <div class="power-led" id="power-led"></div>
+            </div>
 
-            <div id="output"></div>
+            <!-- Screen -->
+            <div class="screen-container">
+                <div class="screen-label">DOT MATRIX WITH STEREO SOUND</div>
+                <canvas id="gameboy-screen"></canvas>
+            </div>
+
+            <!-- Nintendo Branding -->
+            <div class="branding">Nintendo GAME BOY</div>
+
+            <!-- Controls -->
+            <div class="controls">
+                <!-- D-Pad -->
+                <div class="dpad">
+                    <div class="dpad-btn dpad-up"></div>
+                    <div class="dpad-btn dpad-down"></div>
+                    <div class="dpad-btn dpad-left"></div>
+                    <div class="dpad-btn dpad-right"></div>
+                    <div class="dpad-btn dpad-center"></div>
+                </div>
+
+                <!-- Start/Select -->
+                <div class="middle-buttons">
+                    <div class="start-select">
+                        <button class="small-btn">SELECT</button>
+                        <button class="small-btn" id="start-btn" disabled>START</button>
+                    </div>
+                    <button class="small-btn" id="reset-btn" disabled>RESET</button>
+                </div>
+
+                <!-- A/B Buttons -->
+                <div class="ab-buttons">
+                    <button class="action-btn btn-b">B</button>
+                    <button class="action-btn btn-a">A</button>
+                </div>
+            </div>
+
+            <!-- Speaker -->
+            <div class="speaker">
+                <div class="speaker-hole"></div>
+                <div class="speaker-hole"></div>
+                <div class="speaker-hole"></div>
+                <div class="speaker-hole"></div>
+                <div class="speaker-hole"></div>
+                <div class="speaker-hole"></div>
+            </div>
+
+            <!-- Load ROM -->
+            <div class="file-input-container">
+                <input type="file" id="rom-input" accept=".gb,.gbc" />
+                <label for="rom-input" class="file-input-label">
+                    LOAD CARTRIDGE
+                </label>
+            </div>
+
+            <!-- Footer -->
+            <div class="footer">© 1989 NINTENDO</div>
         </div>
 
         <script type="module">
-            import init, { run } from "./pkg/rgb_wasm.js";
+            import init, { Emulator } from "./pkg/rgb_wasm.js";
 
-            // Auto-run on page load
-            window.addEventListener("load", async () => {
+            let emulator = null;
+            let animationId = null;
+
+            // DOM elements
+            const romInput = document.getElementById("rom-input");
+            const startBtn = document.getElementById("start-btn");
+            const resetBtn = document.getElementById("reset-btn");
+            const powerLed = document.getElementById("power-led");
+
+            // Initialize WASM
+            async function initEmulator() {
                 try {
                     await init();
-                    run();
+                    emulator = new Emulator("gameboy-screen", 3);
+                    console.log("Emulator initialized");
                 } catch (err) {
-                    document.getElementById("output").innerHTML =
-                        `Error: ${err}`;
+                    console.error("Failed to initialize:", err);
+                }
+            }
+
+            // Load ROM
+            romInput.addEventListener("change", async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const romData = new Uint8Array(arrayBuffer);
+
+                    emulator.load_rom(romData);
+                    startBtn.disabled = false;
+                    resetBtn.disabled = false;
+
+                    console.log("ROM loaded:", file.name);
+                } catch (err) {
+                    console.error("Failed to load ROM:", err);
                 }
             });
+
+            // Start
+            startBtn.addEventListener("click", () => {
+                if (emulator && !emulator.is_running()) {
+                    emulator.start();
+                    powerLed.classList.add("on");
+                    startEmulationLoop();
+                }
+            });
+
+            // Reset
+            resetBtn.addEventListener("click", () => {
+                if (emulator) {
+                    emulator.stop();
+                    powerLed.classList.remove("on");
+                    if (animationId) {
+                        cancelAnimationFrame(animationId);
+                        animationId = null;
+                    }
+                    // Reload ROM
+                    const file = romInput.files[0];
+                    if (file) {
+                        file.arrayBuffer().then(buffer => {
+                            emulator.load_rom(new Uint8Array(buffer));
+                        });
+                    }
+                }
+            });
+
+            // Emulation loop
+            function startEmulationLoop() {
+                function loop() {
+                    if (!emulator || !emulator.is_running()) {
+                        return;
+                    }
+
+                    try {
+                        emulator.step_frame();
+                        emulator.render();
+                        animationId = requestAnimationFrame(loop);
+                    } catch (err) {
+                        console.error("Emulation error:", err);
+                        emulator.stop();
+                        powerLed.classList.remove("on");
+                    }
+                }
+                loop();
+            }
+
+            // Initialize on load
+            window.addEventListener("load", initEmulator);
         </script>
     </body>
 </html>

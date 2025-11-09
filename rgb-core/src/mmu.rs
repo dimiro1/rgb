@@ -24,7 +24,7 @@ use crate::cartridge::{Cartridge, CartridgeType};
 /// 0xFFFF        : Interrupt Enable Register
 pub struct Mmu {
     /// Cartridge (contains ROM)
-    cartridge: Cartridge,
+    pub cartridge: Cartridge,
 
     /// Current ROM bank (for 0x4000-0x7FFF region)
     rom_bank: usize,
@@ -344,6 +344,16 @@ impl Mmu {
 
             _ => unreachable!(),
         }
+    }
+
+    /// Get reference to VRAM for PPU rendering
+    pub fn vram(&self) -> &[u8] {
+        &self.vram
+    }
+
+    /// Get reference to OAM for PPU rendering
+    pub fn oam(&self) -> &[u8] {
+        &self.oam
     }
 }
 

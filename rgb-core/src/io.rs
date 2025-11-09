@@ -31,7 +31,7 @@ pub const NR_52: u16 = 0xFF26; // Sound on/off
 
 // LCD registers
 pub const LCDC: u16 = 0xFF40; // LCD control
-// pub const STAT: u16 = 0xFF41; // LCD status
+pub const STAT: u16 = 0xFF41; // LCD status
 pub const SCY: u16 = 0xFF42; // Scroll Y
 pub const SCX: u16 = 0xFF43; // Scroll X
 pub const LY: u16 = 0xFF44; // LCD Y coordinate
@@ -44,16 +44,3 @@ pub const WY: u16 = 0xFF4A; // Window Y position
 pub const WX: u16 = 0xFF4B; // Window X position
 
 pub const IE: u16 = 0xFFFF; // Interrupt enable
-
-// Memory region start addresses
-// pub const ROM0: u16 = 0x0000; // ROM bank 0
-// pub const ROM1: u16 = 0x4000; // ROM bank 1 (switchable)
-// pub const VRAM: u16 = 0x8000; // Video RAM
-// pub const BTD0: u16 = 0x8000; // Background tile data 0
-// pub const BTD1: u16 = 0x8800; // Background tile data 1
-// pub const BTM0: u16 = 0x9800; // Background tile map 0
-// pub const BTM1: u16 = 0x9C00; // Background tile map 1
-// pub const RAM1: u16 = 0xA000; // Switchable RAM (cartridge RAM)
-// pub const RAM0: u16 = 0xC000; // Internal RAM
-// pub const ECHO: u16 = 0xE000; // Echo of internal RAM
-// pub const OAM: u16 = 0xFE00; // Object attribute memory
