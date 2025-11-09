@@ -15,7 +15,7 @@ This is a work in progress. I have no idea if I'm going to finish it.
 
 ## AI disclaimer
 
-Not that I have to say this, but: This isn't my first emulator project. I built a similar one in C++ back in university, and I'm generally enthusiastic about gaming emulation. I'm fairly new to Rust and still learning the language's nuances, but I designed the entire system myself. I used Claude Code to speed up the implementation and help me navigate Rust idioms, since it types much faster than I do.
+I designed the entire system myself based on my previous [GameBoyCPP](https://github.com/dimiro1/GameBoyCPP) emulator. I used Claude Code to speed up the Rust implementation and navigate language idioms.
 
 ## Running
 
